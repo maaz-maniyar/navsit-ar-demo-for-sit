@@ -9,27 +9,42 @@ function Chatbot() {
     const handleSend = async () => {
         if (!input) return;
 
+        // Add user message
         setMessages(prev => [...prev, { sender: "user", text: input }]);
 
+        // Check if input contains "navigate"
         if (input.toLowerCase().includes("navigate")) {
-            // fetch mock backend JSON
-            const res = await fetch("/mockPath.json");
-            const data = await res.json();
-            setPathData(data);
+            try {
+                const res = await fetch("/mockPath.json"); // fetch from public folder
+                if (!res.ok) throw new Error("HTTP error " + res.status);
+                const data = await res.json();
 
-            setMessages(prev => [
-                ...prev,
-                { sender: "bot", text: "Starting navigation..." }
-            ]);
+                // Update state for pathData (AR)
+                setPathData(data);
+
+                // Bot response
+                setMessages(prev => [
+                    ...prev,
+                    { sender: "bot", text: "Starting navigation..." }
+                ]);
+            } catch (err) {
+                console.error("Failed to fetch mockPath:", err);
+                setMessages(prev => [
+                    ...prev,
+                    { sender: "bot", text: "Failed to start navigation 😢" }
+                ]);
+            }
         } else {
+            // For other messages
             setMessages(prev => [
                 ...prev,
-                { sender: "bot", text: "I can help you navigate the campus 😄" }
+                { sender: "bot", text: "I don't understand 😕" }
             ]);
         }
 
         setInput("");
     };
+
 
     return (
         <div style={{ fontFamily: "Arial", width: "400px", margin: "20px auto" }}>
