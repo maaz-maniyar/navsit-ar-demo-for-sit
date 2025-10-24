@@ -1,23 +1,23 @@
 import React, { useState } from "react";
 import Chatbot from "./components/Chatbot";
-import NavigationButton from "./components/NavigationButton";
 import ARView from "./components/ARView";
 
 function App() {
-  const [navigationTarget, setNavigationTarget] = useState(null);
-  const [showAR, setShowAR] = useState(false);
+    const [showAR, setShowAR] = useState(false);
+    const [path, setPath] = useState([]);
 
-  return (
-      <div>
-        {!showAR && (
-            <>
-              <Chatbot setNavigationTarget={setNavigationTarget} />
-              <NavigationButton target={navigationTarget} onNavigate={() => setShowAR(true)} />
-            </>
-        )}
-        {showAR && <ARView target={navigationTarget} />}
-      </div>
-  );
+    return (
+        <div>
+            {!showAR ? (
+                <Chatbot
+                    setShowAR={setShowAR}
+                    setPath={setPath}
+                />
+            ) : (
+                <ARView path={path} />
+            )}
+        </div>
+    );
 }
 
 export default App;

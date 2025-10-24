@@ -1,31 +1,21 @@
 import React, { useEffect } from "react";
-import { getPath } from "../api";
 
-export default function ARView({ target }) {
+function ARView({ pathData }) {
     useEffect(() => {
-        const startAR = async () => {
-            // TODO: get user's current location
-            const userLocation = [13.321, 77.123]; // example, integrate GPS
-            const path = await getPath("MainGate", target); // replace MainGate with actual current node
+        console.log("AR path data:", pathData);
 
-            // Render path with A-Frame entities
-            // Example:
-            const scene = document.querySelector("a-scene");
-            path.forEach((coord, i) => {
-                const arrow = document.createElement("a-entity");
-                arrow.setAttribute("geometry", "primitive: cone; height: 0.5; radiusBottom: 0.2;");
-                arrow.setAttribute("material", "color: red;");
-                arrow.setAttribute("position", { x: coord[0], y: 0, z: coord[1] });
-                scene.appendChild(arrow);
-            });
-        };
-
-        startAR();
-    }, [target]);
+        // Example: you can loop through edges and render arrows using AR.js
+        // For now we just log it; later integrate AR.js scene
+    }, [pathData]);
 
     return (
-        <a-scene embedded arjs='sourceType: webcam;'>
-            <a-camera></a-camera>
-        </a-scene>
+        <div style={{ marginTop: "20px" }}>
+            <h3>AR View (Camera + arrows)</h3>
+            <div id="ar-container" style={{ width: "100%", height: "400px", backgroundColor: "#000" }}>
+                {/* AR.js camera + arrows will be rendered here */}
+            </div>
+        </div>
     );
 }
+
+export default ARView;
