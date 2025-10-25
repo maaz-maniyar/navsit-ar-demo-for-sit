@@ -22,7 +22,7 @@ function ARView({ path }) {
         renderer.setPixelRatio(window.devicePixelRatio);
         if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
 
-        // Video (mobile camera)
+        // Video background
         video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
@@ -35,7 +35,6 @@ function ARView({ path }) {
                 video.srcObject = stream;
                 video.play();
 
-                // Fullscreen video background
                 videoTexture = new THREE.VideoTexture(video);
                 const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
                 const videoGeometry = new THREE.PlaneGeometry(2, 2 * (height / width));
@@ -47,32 +46,30 @@ function ARView({ path }) {
                 console.error("Error accessing camera: ", err);
             });
 
-        // Function to create a 3D arrow
+        // Create proper 3D arrow
         const createArrow = (yOffset = -0.5, color = 0xff0000) => {
             const arrowGroup = new THREE.Group();
 
-            // Shaft
+            // Shaft (cylinder along Y)
             const shaft = new THREE.CylinderGeometry(0.02, 0.02, 0.4, 12);
             const shaftMat = new THREE.MeshBasicMaterial({ color });
             const shaftMesh = new THREE.Mesh(shaft, shaftMat);
-            shaftMesh.position.y = 0.2; // shift up so bottom is at y=0
-            shaftMesh.rotation.z = Math.PI / 2; // point forward
+            shaftMesh.position.y = 0.2; // shaft base at y=0
             arrowGroup.add(shaftMesh);
 
-            // Head
+            // Head (cone on top)
             const head = new THREE.ConeGeometry(0.05, 0.15, 12);
             const headMat = new THREE.MeshBasicMaterial({ color });
             const headMesh = new THREE.Mesh(head, headMat);
-            headMesh.position.y = 0.4; // tip at end of shaft
-            headMesh.rotation.z = Math.PI / 2;
+            headMesh.position.y = 0.4 + 0.075; // top of shaft
             arrowGroup.add(headMesh);
 
-            // Position the arrow in front of camera, lower part of screen
+            // Position arrow group in front of camera, lower screen
             arrowGroup.position.set(0, yOffset, -0.5);
+
             scene.add(arrowGroup);
         };
 
-        // Render arrows along path sequence
         path.forEach((_, i) => createArrow(-0.5 + i * 0.05));
 
         // Animate
