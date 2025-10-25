@@ -5,6 +5,7 @@ function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
     const [userCoords, setUserCoords] = useState(null);
+    const [deviceHeading, setDeviceHeading] = useState(0);
 
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture, arrowGroup;
@@ -39,10 +40,9 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera:", err));
 
-        // --- Arrow setup (cone first, then cylinder) ---
+        // --- Arrow setup ---
         arrowGroup = new THREE.Group();
 
-        // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
@@ -50,7 +50,6 @@ function ARView({ path, arrowStyle }) {
         cone.position.y = 0.2;
         arrowGroup.add(cone);
 
-        // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
             new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
@@ -58,7 +57,6 @@ function ARView({ path, arrowStyle }) {
         cylinder.position.y = -0.1;
         arrowGroup.add(cylinder);
 
-        // Place arrow at bottom of screen, facing forward
         arrowGroup.position.set(0, -0.5, -2);
         camera.add(arrowGroup);
         scene.add(camera);
@@ -84,34 +82,49 @@ function ARView({ path, arrowStyle }) {
             { enableHighAccuracy: true, maximumAge: 1000 }
         );
 
-        // --- Bearing calculation between two GPS points ---
+        // --- Bearing calculation ---
+        const toRad = (deg) => (deg * Math.PI) / 180;
         const calculateBearing = (lat1, lon1, lat2, lon2) => {
-            const toRad = (deg) => (deg * Math.PI) / 180;
             const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
             const x =
                 Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
                 Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
             let brng = Math.atan2(y, x);
             brng = (brng * 180) / Math.PI;
-            return (brng + 360) % 360; // Normalize to 0–360
+            return (brng + 360) % 360;
         };
 
-        // --- Handle device orientation ---
-        let deviceHeading = 0;
-        const handleOrientation = (event) => {
-            if (event.absolute && event.alpha !== null) {
-                deviceHeading = event.alpha;
+        // --- Handle device orientation with permissions ---
+        const requestOrientationPermission = async () => {
+            if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+                try {
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response === "granted") {
+                        window.addEventListener("deviceorientation", handleOrientation, true);
+                    }
+                } catch (e) {
+                    console.error("Orientation permission denied:", e);
+                }
+            } else {
+                window.addEventListener("deviceorientationabsolute", handleOrientation, true);
+                window.addEventListener("deviceorientation", handleOrientation, true);
             }
         };
-        window.addEventListener("deviceorientationabsolute", handleOrientation, true);
-        window.addEventListener("deviceorientation", handleOrientation, true);
+
+        const handleOrientation = (event) => {
+            if (event.alpha != null) {
+                // Use alpha (0–360°) as compass heading
+                setDeviceHeading(event.alpha);
+            }
+        };
+
+        requestOrientationPermission();
 
         // --- Animate ---
         const animate = () => {
             requestAnimationFrame(animate);
 
             if (userCoords) {
-                // Calculate bearing from user → SIT Front Gate
                 const bearingToTarget = calculateBearing(
                     userCoords.lat,
                     userCoords.lon,
@@ -119,7 +132,7 @@ function ARView({ path, arrowStyle }) {
                     sitFrontGate.lon
                 );
 
-                // Determine arrow rotation relative to device heading
+                // Compute relative rotation
                 const relativeBearing = THREE.MathUtils.degToRad(bearingToTarget - deviceHeading);
                 arrowGroup.rotation.y = relativeBearing;
             }
