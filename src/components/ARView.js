@@ -1,15 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 
 function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
-    const [currentIndex, setCurrentIndex] = useState(0); // For simulating movement
 
     useEffect(() => {
-        if (!path || path.length < 2) return;
-
-        let renderer, scene, camera, video, videoTexture;
+        let renderer, scene, camera, video, videoTexture, arrowGroup;
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -42,24 +39,26 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow group with one cylinder + one cone (unchanged)
-        const arrowGroup = new THREE.Group();
+        // Arrow group (cone first, then cylinder)
+        arrowGroup = new THREE.Group();
 
-        const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
-            new THREE.MeshStandardMaterial({ color: 0xffffff })
-        );
-        cylinder.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-        cylinder.rotation.x = -Math.PI / 2;
-        arrowGroup.add(cylinder);
-
+        // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
         );
-        cone.position.set(0, (arrowStyle?.y || -0.5) + 0.15, arrowStyle?.z || -1);
-        cone.rotation.x = -Math.PI / 2;
+        cone.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+        cone.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cone);
+
+        // Cylinder (stem) → white
+        const cylinder = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
+            new THREE.MeshStandardMaterial({ color: 0xffffff })
+        );
+        cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
+        cylinder.rotation.x = -Math.PI / 2; // point forward
+        arrowGroup.add(cylinder);
 
         camera.add(arrowGroup);
         scene.add(camera);
@@ -70,42 +69,33 @@ function ARView({ path, arrowStyle }) {
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // Simulate arrow pointing along the path
-        let step = 0;
-        const steps = 200; // steps per segment
-        const interval = setInterval(() => {
-            if (currentIndex >= path.length - 1) return;
-
-            const start = path[currentIndex];
-            const end = path[currentIndex + 1];
-
-            // Compute direction vector for arrow
-            const dir = new THREE.Vector3(end.lng - start.lng, 0, end.lat - start.lat).normalize();
-            arrowGroup.lookAt(dir.x, dir.y, dir.z);
-
-            step++;
-            if (step > steps) {
-                step = 0;
-                setCurrentIndex((prev) => Math.min(prev + 1, path.length - 2));
-            }
-        }, 50);
-
         // Animate
         const animate = () => {
             requestAnimationFrame(animate);
+
+            // --- Arrow direction update ---
+            if (path && path.length > 1) {
+                const start = path[0]; // current node
+                const end = path[1];   // next node
+                const dir = new THREE.Vector3(end.lng - start.lng, 0, end.lat - start.lat).normalize();
+
+                // Point the arrowGroup toward the next node
+                const arrowPos = new THREE.Vector3(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+                arrowGroup.lookAt(arrowPos.clone().add(dir));
+            }
+
             renderer.render(scene, camera);
         };
         animate();
 
         // Cleanup
         return () => {
-            clearInterval(interval);
             if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
             if (video && video.srcObject) {
                 video.srcObject.getTracks().forEach((track) => track.stop());
             }
         };
-    }, [path, arrowStyle, currentIndex]);
+    }, [path, arrowStyle]);
 
     return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
 }
