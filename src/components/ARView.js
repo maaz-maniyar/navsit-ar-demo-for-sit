@@ -40,37 +40,40 @@ function ARView({ path }) {
                 const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
                 const videoGeometry = new THREE.PlaneGeometry(2, 2 * (height / width));
                 const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
-                videoMesh.position.set(0, 0, -1); // Behind arrows
+                videoMesh.position.set(0, 0, -1);
                 scene.add(videoMesh);
             })
             .catch((err) => {
                 console.error("Error accessing camera: ", err);
             });
 
-        // Create arrows in front of camera
-        const createArrow = (yOffset = 0, color = 0xff0000) => {
+        // Function to create a 3D arrow
+        const createArrow = (yOffset = -0.5, color = 0xff0000) => {
             const arrowGroup = new THREE.Group();
 
-            const shaft = new THREE.CylinderGeometry(0.01, 0.01, 0.3, 12);
+            // Shaft
+            const shaft = new THREE.CylinderGeometry(0.02, 0.02, 0.4, 12);
             const shaftMat = new THREE.MeshBasicMaterial({ color });
             const shaftMesh = new THREE.Mesh(shaft, shaftMat);
-            shaftMesh.position.y = 0.15;
-            shaftMesh.rotation.x = Math.PI / 2;
+            shaftMesh.position.y = 0.2; // shift up so bottom is at y=0
+            shaftMesh.rotation.z = Math.PI / 2; // point forward
             arrowGroup.add(shaftMesh);
 
-            const head = new THREE.ConeGeometry(0.03, 0.1, 12);
+            // Head
+            const head = new THREE.ConeGeometry(0.05, 0.15, 12);
             const headMat = new THREE.MeshBasicMaterial({ color });
             const headMesh = new THREE.Mesh(head, headMat);
-            headMesh.position.y = 0.35;
-            headMesh.rotation.x = Math.PI / 2;
+            headMesh.position.y = 0.4; // tip at end of shaft
+            headMesh.rotation.z = Math.PI / 2;
             arrowGroup.add(headMesh);
 
+            // Position the arrow in front of camera, lower part of screen
             arrowGroup.position.set(0, yOffset, -0.5);
             scene.add(arrowGroup);
         };
 
         // Render arrows along path sequence
-        path.forEach((_, i) => createArrow(i * 0.2));
+        path.forEach((_, i) => createArrow(-0.5 + i * 0.05));
 
         // Animate
         const animate = () => {
