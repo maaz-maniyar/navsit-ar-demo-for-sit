@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import Chatbot from "./components/Chatbot";
-import ARView from "./components/ARView";
+import Chatbot from "./Chatbot";
+import ARView from "./ARView";
 
 function App() {
     const [showAR, setShowAR] = useState(false);
@@ -9,10 +9,7 @@ function App() {
     return (
         <div>
             {!showAR ? (
-                <Chatbot
-                    setShowAR={setShowAR}
-                    setPath={setPath}
-                />
+                <Chatbot setShowAR={setShowAR} setPath={setPath} />
             ) : (
                 <ARView path={path} />
             )}
