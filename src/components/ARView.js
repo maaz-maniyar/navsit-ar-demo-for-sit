@@ -2,64 +2,79 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 
 function ARView({ path }) {
-    const mountRef = useRef(null);
+    const mountRef = useRef();
+    const videoRef = useRef();
 
     useEffect(() => {
-        if (!navigator.xr) {
-            alert("WebXR not supported on this device/browser");
-            return;
-        }
+        let renderer, scene, camera, video, videoTexture;
 
-        let scene, camera, renderer, reticle;
-        let arrowMeshes = [];
+        const width = window.innerWidth;
+        const height = window.innerHeight;
 
-        const init = async () => {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(
-                70,
-                window.innerWidth / window.innerHeight,
-                0.01,
-                20
+        // Scene & Camera
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+        camera.position.set(0, 1.6, 0);
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(width, height);
+        if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
+
+        // Video (mobile camera)
+        video = document.createElement("video");
+        video.setAttribute("autoplay", "");
+        video.setAttribute("playsinline", "");
+        video.style.display = "none";
+        videoRef.current = video;
+
+        navigator.mediaDevices
+            .getUserMedia({ video: { facingMode: "environment" }, audio: false })
+            .then((stream) => {
+                video.srcObject = stream;
+                video.play();
+
+                // Use video as background texture
+                videoTexture = new THREE.VideoTexture(video);
+                const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
+                const videoGeometry = new THREE.PlaneGeometry(2, 2);
+                const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
+                videoMesh.position.z = -1; // Behind arrows
+                scene.add(videoMesh);
+            })
+            .catch((err) => {
+                console.error("Error accessing camera: ", err);
+            });
+
+        // Arrows for path
+        const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        path.forEach(([lat, lng], index) => {
+            if (index === 0) return;
+            const [prevLat, prevLng] = path[index - 1];
+            const dir = new THREE.Vector3(lng - prevLng, 0, lat - prevLat);
+            const length = dir.length();
+            const arrow = new THREE.ArrowHelper(
+                dir.clone().normalize(),
+                new THREE.Vector3(prevLng, 0, prevLat),
+                length,
+                0xff0000
             );
+            scene.add(arrow);
+        });
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-
-            mountRef.current.appendChild(renderer.domElement);
-
-            // Add light
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            scene.add(light);
-
-            // Create arrow markers
-            const arrowGeometry = new THREE.ConeGeometry(0.05, 0.15, 8);
-            const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-
-            path.forEach((pos) => {
-                const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-                arrow.position.set(pos[0], 0, pos[1]); // x, y, z
-                arrow.rotation.x = -Math.PI / 2; // point downwards
-                scene.add(arrow);
-                arrowMeshes.push(arrow);
-            });
-
-            // Start AR session
-            const session = await navigator.xr.requestSession("immersive-ar", {
-                requiredFeatures: ["local-floor"],
-            });
-            renderer.xr.setSession(session);
-
-            renderer.setAnimationLoop(() => {
-                renderer.render(scene, camera);
-            });
+        // Animate
+        const animate = function () {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
         };
+        animate();
 
-        init();
-
+        // Cleanup
         return () => {
-            renderer?.setAnimationLoop(null);
             if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach((track) => track.stop());
+            }
         };
     }, [path]);
 

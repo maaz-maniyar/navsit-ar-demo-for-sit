@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import Chatbot from "./Chatbot";
-import ARView from "./ARView";
+import Chatbot from "./components/Chatbot";
+import ARView from "./components/ARView";
 
 function App() {
     const [showAR, setShowAR] = useState(false);
