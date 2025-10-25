@@ -4,8 +4,7 @@ import * as THREE from "three";
 function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
-    const arrowGroupRef = useRef();
-    const [userCoords, setUserCoords] = useState(null);
+    const [heading, setHeading] = useState(0); // device heading in degrees
 
     // SIT Front Gate coordinates
     const targetLat = 13.331748;
@@ -13,6 +12,7 @@ function ARView({ path, arrowStyle }) {
 
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture;
+        let arrowGroup;
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -45,9 +45,8 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow group (cone + cylinder)
-        const arrowGroup = new THREE.Group();
-        arrowGroupRef.current = arrowGroup;
+        // Arrow group (cone first, then cylinder)
+        arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
         const cone = new THREE.Mesh(
@@ -76,63 +75,30 @@ function ARView({ path, arrowStyle }) {
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // User GPS
-        const geoWatch = navigator.geolocation.watchPosition(
-            (pos) => {
-                setUserCoords({
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                });
-            },
-            (err) => console.error("GPS error: ", err),
-            { enableHighAccuracy: true, maximumAge: 1000 }
-        );
-
-        // Device orientation
-        let heading = 0;
-        const handleOrientation = (e) => {
-            if (e.webkitCompassHeading !== undefined) {
-                heading = THREE.MathUtils.degToRad(e.webkitCompassHeading);
-            } else if (e.alpha !== null) {
-                heading = THREE.MathUtils.degToRad(e.alpha);
-            }
-        };
-        window.addEventListener(
-            "deviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation",
-            handleOrientation,
-            true
-        );
-
-        // Compute bearing from current location to target
-        const computeBearing = (lat1, lng1, lat2, lng2) => {
-            const φ1 = THREE.MathUtils.degToRad(lat1);
-            const φ2 = THREE.MathUtils.degToRad(lat2);
-            const Δλ = THREE.MathUtils.degToRad(lng2 - lng1);
-            const y = Math.sin(Δλ) * Math.cos(φ2);
-            const x =
-                Math.cos(φ1) * Math.sin(φ2) -
-                Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-            return Math.atan2(y, x);
-        };
-
         // Animate
         const animate = () => {
             requestAnimationFrame(animate);
 
-            // Rotate arrow to point toward SIT Front Gate
-            if (userCoords && arrowGroupRef.current) {
-                const bearing = computeBearing(
-                    userCoords.lat,
-                    userCoords.lng,
-                    targetLat,
-                    targetLng
-                );
-                arrowGroupRef.current.rotation.y = -heading + bearing;
+            // Rotate arrow based on device heading to always point SIT Front Gate
+            if (arrowGroup && heading !== null) {
+                // For demonstration, we'll just rotate around Y axis
+                const headingRad = (heading * Math.PI) / 180;
+                arrowGroup.rotation.y = -headingRad;
             }
 
             renderer.render(scene, camera);
         };
         animate();
+
+        // Listen to device orientation
+        const handleOrientation = (event) => {
+            // Use 'alpha' for compass heading
+            if (event.alpha != null) {
+                setHeading(event.alpha);
+            }
+        };
+        window.addEventListener("deviceorientationabsolute", handleOrientation, true);
+        window.addEventListener("deviceorientation", handleOrientation, true);
 
         // Cleanup
         return () => {
@@ -140,13 +106,10 @@ function ARView({ path, arrowStyle }) {
             if (video && video.srcObject) {
                 video.srcObject.getTracks().forEach((track) => track.stop());
             }
-            navigator.geolocation.clearWatch(geoWatch);
-            window.removeEventListener(
-                "deviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation",
-                handleOrientation
-            );
+            window.removeEventListener("deviceorientationabsolute", handleOrientation);
+            window.removeEventListener("deviceorientation", handleOrientation);
         };
-    }, [path, arrowStyle]);
+    }, [path, arrowStyle, heading]);
 
     return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
 }
