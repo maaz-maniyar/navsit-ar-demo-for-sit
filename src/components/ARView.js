@@ -7,7 +7,8 @@ function ARView({ path, arrowStyle }) {
     const [heading, setHeading] = useState("No orientation yet");
 
     useEffect(() => {
-        let renderer, scene, camera, video, videoTexture, arrowGroup;
+        let renderer, scene, camera, video, videoTexture;
+
         const width = window.innerWidth;
         const height = window.innerHeight;
 
@@ -20,7 +21,7 @@ function ARView({ path, arrowStyle }) {
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
-        mountRef.current?.appendChild(renderer.domElement);
+        if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
 
         // --- Camera Feed ---
         video = document.createElement("video");
@@ -39,43 +40,46 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera:", err));
 
-        // --- Arrow setup ---
-        arrowGroup = new THREE.Group();
+        // --- Arrow setup (exact same structure that worked) ---
+        const arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
         );
-        cone.position.y = 0.2;
+        cone.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+        cone.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cone);
 
         // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
+            new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
-        cylinder.position.y = -0.1;
+        // Slightly behind the cone
+        cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
+        cylinder.rotation.x = -Math.PI / 2;
         arrowGroup.add(cylinder);
 
-        arrowGroup.position.set(0, -0.5, -2);
-        scene.add(arrowGroup); // <— note: attach to scene, not camera
+        camera.add(arrowGroup);
+        scene.add(camera);
 
         // --- Lighting ---
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-        dirLight.position.set(0, 2, 2);
-        scene.add(dirLight);
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(0, 10, 10);
+        scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // --- Orientation Handling ---
+        // --- Orientation Handling (safe add) ---
         const handleOrientation = (event) => {
             if (event.absolute || event.alpha != null) {
-                const alpha = event.alpha; // 0–360°
+                const alpha = event.alpha; // degrees
                 setHeading(alpha.toFixed(1) + "°");
 
-                // Convert compass heading to radians and invert so it matches camera orientation
+                // Convert to radians and rotate around Y-axis
                 const rotationY = THREE.MathUtils.degToRad(-alpha);
-                arrowGroup.rotation.set(0, rotationY, 0);
+                arrowGroup.rotation.y = rotationY;
             }
         };
 
@@ -101,6 +105,7 @@ function ARView({ path, arrowStyle }) {
 
         requestOrientationPermission();
 
+        // --- Animate ---
         const animate = () => {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
@@ -117,7 +122,7 @@ function ARView({ path, arrowStyle }) {
                 video.srcObject.getTracks().forEach((t) => t.stop());
             }
         };
-    }, []);
+    }, [path, arrowStyle]);
 
     return (
         <div>
