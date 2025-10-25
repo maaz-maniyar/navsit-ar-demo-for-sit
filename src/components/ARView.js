@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-function ARView({ path, arrowStyle }) {
+function ARView({ path }) {
     const mountRef = useRef();
     const videoRef = useRef();
 
@@ -34,44 +34,51 @@ function ARView({ path, arrowStyle }) {
             .then((stream) => {
                 video.srcObject = stream;
                 video.play();
+
+                // Use video as background texture
                 videoTexture = new THREE.VideoTexture(video);
-                scene.background = videoTexture;
+                const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
+                const videoGeometry = new THREE.PlaneGeometry(2, 2);
+                const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
+                videoMesh.position.z = -1; // Behind arrows
+                scene.add(videoMesh);
             })
-            .catch((err) => console.error("Error accessing camera: ", err));
+            .catch((err) => {
+                console.error("Error accessing camera: ", err);
+            });
 
-        // Arrow group with one cylinder + one cone
-        const material = new THREE.MeshStandardMaterial({ color: arrowStyle?.color || 0xff0000 });
-        const arrowGroup = new THREE.Group();
+        // Create arrows along the path
+        path.forEach(([lat, lng], index) => {
+            if (index === 0) return;
+            const [prevLat, prevLng] = path[index - 1];
+            const dir = new THREE.Vector3(lng - prevLng, 0, lat - prevLat);
+            const length = dir.length();
 
-        // Cylinder (stem)
-        const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
-            material
-        );
-        cylinder.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-        cylinder.rotation.x = -Math.PI / 2;
-        arrowGroup.add(cylinder);
+            // Cylinder (shaft)
+            const shaftGeometry = new THREE.CylinderGeometry(0.02, 0.02, length, 8);
+            const shaftMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff }); // White
+            const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+            shaft.position.set(
+                (prevLng + lng) / 2,
+                0.1,
+                (prevLat + lat) / 2
+            );
+            shaft.lookAt(new THREE.Vector3(lng, 0.1, lat));
+            shaft.rotateX(Math.PI / 2);
+            scene.add(shaft);
 
-        // Cone (tip)
-        const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(0.05, 0.2, 16),
-            material
-        );
-        cone.position.set(0, (arrowStyle?.y || -0.5) + 0.15, arrowStyle?.z || -1);
-        cone.rotation.x = -Math.PI / 2;
-        arrowGroup.add(cone);
-
-        camera.add(arrowGroup);
-        scene.add(camera);
-
-        // Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(0, 10, 10);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            // Cone (tip)
+            const coneGeometry = new THREE.ConeGeometry(0.05, 0.1, 8);
+            const coneMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 }); // Black
+            const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            cone.position.set(lng, 0.1, lat);
+            cone.lookAt(new THREE.Vector3(prevLng, 0.1, prevLat));
+            cone.rotateX(Math.PI / 2);
+            scene.add(cone);
+        });
 
         // Animate
-        const animate = () => {
+        const animate = function () {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
         };
@@ -84,7 +91,7 @@ function ARView({ path, arrowStyle }) {
                 video.srcObject.getTracks().forEach((track) => track.stop());
             }
         };
-    }, [path, arrowStyle]);
+    }, [path]);
 
     return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
 }
