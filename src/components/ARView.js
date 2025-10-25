@@ -20,7 +20,8 @@ function ARView({ arrowStyle }) {
         // Renderer setup
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(window.devicePixelRatio * 0.9); // 🔹 smoother on high-DPI phones
+        renderer.outputEncoding = THREE.sRGBEncoding;
         if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
 
         // Video background (rear camera)
@@ -28,6 +29,8 @@ function ARView({ arrowStyle }) {
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
         video.style.display = "none";
+        video.style.transform = "translateZ(0)"; // 🔹 GPU compositing hint
+        video.style.willChange = "transform";    // 🔹 keeps video stable
         videoRef.current = video;
 
         navigator.mediaDevices
@@ -35,15 +38,20 @@ function ARView({ arrowStyle }) {
             .then((stream) => {
                 video.srcObject = stream;
                 video.play();
+
+                // 🔹 FIXED: stable texture setup
                 videoTexture = new THREE.VideoTexture(video);
                 videoTexture.minFilter = THREE.LinearFilter;
                 videoTexture.magFilter = THREE.LinearFilter;
                 videoTexture.format = THREE.RGBFormat;
+                videoTexture.generateMipmaps = false;   // ✅ stops flickering
+                videoTexture.encoding = THREE.sRGBEncoding;
+                videoTexture.needsUpdate = true;
                 scene.background = videoTexture;
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow model (cone + cylinder)
+        // Arrow model
         const arrowGroup = new THREE.Group();
         arrowGroup.position.set(0, -0.5, -1);
         arrowGroupRef.current = arrowGroup;
@@ -76,7 +84,7 @@ function ARView({ arrowStyle }) {
         const targetLat = 13.331748;
         const targetLng = 77.127378;
 
-        // Compute bearing between two coordinates
+        // Bearing calculator
         const computeBearing = (lat1, lng1, lat2, lng2) => {
             const φ1 = THREE.MathUtils.degToRad(lat1);
             const φ2 = THREE.MathUtils.degToRad(lat2);
@@ -103,10 +111,8 @@ function ARView({ arrowStyle }) {
         const handleOrientation = (event) => {
             let heading;
             if (typeof event.webkitCompassHeading !== "undefined") {
-                // iOS: direct heading in degrees from north
                 heading = THREE.MathUtils.degToRad(event.webkitCompassHeading);
             } else {
-                // Android: compute from rotation matrix
                 const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
                 const beta = THREE.MathUtils.degToRad(event.beta || 0);
                 const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
@@ -115,7 +121,6 @@ function ARView({ arrowStyle }) {
                 const cB = Math.cos(beta), sB = Math.sin(beta);
                 const cG = Math.cos(gamma), sG = Math.sin(gamma);
 
-                // W3C formula for compass heading
                 const Vx = -cA * sG - sA * sB * cG;
                 const Vy = -sA * sG + cA * sB * cG;
                 heading = Math.atan(Vx / Vy);
@@ -125,7 +130,6 @@ function ARView({ arrowStyle }) {
             deviceHeading = heading;
         };
 
-        // Ask permission on iOS if needed
         if (typeof DeviceOrientationEvent.requestPermission === "function") {
             DeviceOrientationEvent.requestPermission().then((response) => {
                 if (response === "granted") {
@@ -136,9 +140,12 @@ function ARView({ arrowStyle }) {
             window.addEventListener("deviceorientation", handleOrientation, true);
         }
 
-        // Animation loop
-        const animate = () => {
+        // Animation loop (with optional frame capping)
+        let lastFrame = 0;
+        const animate = (time) => {
             requestAnimationFrame(animate);
+            if (time - lastFrame < 16) return; // ~60fps
+            lastFrame = time;
 
             if (userCoords && arrowGroupRef.current) {
                 const bearing = computeBearing(
@@ -147,11 +154,14 @@ function ARView({ arrowStyle }) {
                     targetLat,
                     targetLng
                 );
-                // Rotate arrow to point toward target
                 arrowGroupRef.current.rotation.y = bearing - deviceHeading;
             }
 
-            if (videoTexture) videoTexture.needsUpdate = true;
+            // 🔹 Update only when a video frame is ready
+            if (videoTexture && video.readyState >= video.HAVE_CURRENT_DATA) {
+                videoTexture.needsUpdate = true;
+            }
+
             renderer.render(scene, camera);
         };
         animate();
