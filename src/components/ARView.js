@@ -14,16 +14,11 @@ function ARView({ path }) {
         // Scene & Camera
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-        camera.position.set(0, 1.6, 1); // position slightly forward
+        camera.position.set(0, 1.6, 3); // Pull camera back a bit to see arrows
 
         // Renderer
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
-        renderer.domElement.style.position = "absolute";
-        renderer.domElement.style.top = "0";
-        renderer.domElement.style.left = "0";
-        renderer.domElement.style.width = "100%";
-        renderer.domElement.style.height = "100%";
         renderer.setPixelRatio(window.devicePixelRatio);
         if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
 
@@ -40,46 +35,68 @@ function ARView({ path }) {
                 video.srcObject = stream;
                 video.play();
 
-                // Use video as background using a fullscreen plane in front of camera
+                // Use video as background texture
                 videoTexture = new THREE.VideoTexture(video);
                 const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
-                const videoGeometry = new THREE.PlaneGeometry(2, 2 * (height / width));
+                const videoGeometry = new THREE.PlaneGeometry(2, 2);
                 const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
-                videoMesh.position.set(0, 0, -2); // always behind arrows
+
+                // Scale to fill screen
+                videoMesh.scale.set(width / height, 1, 1);
+                videoMesh.position.set(0, 0, -5); // Push it behind arrows
                 scene.add(videoMesh);
             })
-            .catch((err) => console.error("Error accessing camera: ", err));
+            .catch((err) => {
+                console.error("Error accessing camera: ", err);
+            });
 
-        // 3D Arrows for path
-        path.forEach(([lat, lng], index) => {
-            if (index === 0) return;
-            const [prevLat, prevLng] = path[index - 1];
-            const dir = new THREE.Vector3(lng - prevLng, 0, lat - prevLat);
+        // Base coordinates for scaling
+        const baseLat = path.length > 0 ? path[0][0] : 0;
+        const baseLng = path.length > 0 ? path[0][1] : 0;
+        const SCALE = 50; // Adjust scale for visibility
+
+        // Add 3D arrows along path
+        const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        const arrowGroup = new THREE.Group();
+
+        for (let i = 1; i < path.length; i++) {
+            const [prevLat, prevLng] = path[i - 1];
+            const [lat, lng] = path[i];
+
+            const x1 = (prevLng - baseLng) * SCALE;
+            const z1 = (prevLat - baseLat) * SCALE;
+            const x2 = (lng - baseLng) * SCALE;
+            const z2 = (lat - baseLat) * SCALE;
+
+            const start = new THREE.Vector3(x1, -0.5, z1); // y = -0.5 for bottom
+            const end = new THREE.Vector3(x2, -0.5, z2);
+            const dir = new THREE.Vector3().subVectors(end, start);
             const length = dir.length();
-            const normalizedDir = dir.clone().normalize();
 
-            // Arrow components
-            const shaft = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.01, 0.01, length * 0.8, 8),
-                new THREE.MeshBasicMaterial({ color: 0xff0000 })
-            );
-            shaft.position.y = 0.05;
-            shaft.rotation.z = Math.atan2(normalizedDir.x, normalizedDir.z);
+            // Arrow head
+            const coneGeometry = new THREE.ConeGeometry(0.1, 0.3, 8);
+            const cone = new THREE.Mesh(coneGeometry, arrowMaterial);
+            cone.position.copy(start.clone().add(dir.clone().multiplyScalar(0.9)));
+            cone.lookAt(end);
+            arrowGroup.add(cone);
 
-            const head = new THREE.Mesh(
-                new THREE.ConeGeometry(0.03, length * 0.2, 8),
-                new THREE.MeshBasicMaterial({ color: 0xff0000 })
-            );
-            head.position.y = 0.05;
-            head.position.z = length * 0.5;
-            head.rotation.z = Math.atan2(normalizedDir.x, normalizedDir.z);
+            // Arrow shaft
+            const cylinderGeometry = new THREE.CylinderGeometry(0.05, 0.05, length * 0.9, 8);
+            const cylinder = new THREE.Mesh(cylinderGeometry, arrowMaterial);
+            cylinder.position.copy(start.clone().add(dir.clone().multiplyScalar(0.45)));
+            cylinder.lookAt(end);
+            cylinder.rotateX(Math.PI / 2);
+            arrowGroup.add(cylinder);
+        }
 
-            const arrowGroup = new THREE.Group();
-            arrowGroup.add(shaft);
-            arrowGroup.add(head);
-            arrowGroup.position.set(prevLng, 0, prevLat);
-            scene.add(arrowGroup);
-        });
+        scene.add(arrowGroup);
+
+        // Lighting for better visibility
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(0, 10, 10);
+        scene.add(light);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
 
         // Animate
         const animate = function () {
@@ -91,11 +108,13 @@ function ARView({ path }) {
         // Cleanup
         return () => {
             if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
-            if (video && video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach((track) => track.stop());
+            }
         };
     }, [path]);
 
-    return <div ref={mountRef} style={{ width: "100vw", height: "100vh", overflow: "hidden" }} />;
+    return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
 }
 
 export default ARView;
