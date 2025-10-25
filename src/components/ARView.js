@@ -39,7 +39,7 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow group with one cone + one cylinder (cone first)
+        // Arrow group (cone first, then cylinder)
         const arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
@@ -47,17 +47,18 @@ function ARView({ path, arrowStyle }) {
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
         );
-        cone.position.set(0, (arrowStyle?.y || -0.5) + 0.15, arrowStyle?.z || -1);
-        cone.rotation.x = -Math.PI / 2;
+        cone.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+        cone.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cone);
 
         // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
+            new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
-        cylinder.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-        cylinder.rotation.x = -Math.PI / 2;
+        // Position it slightly behind the cone
+        cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
+        cylinder.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cylinder);
 
         camera.add(arrowGroup);
