@@ -19,15 +19,7 @@ function ARView({ path }) {
         // Renderer
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
-        renderer.setPixelRatio(window.devicePixelRatio);
         if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
-
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
-        directionalLight.position.set(0, 1, 1);
-        scene.add(directionalLight);
 
         // Video (mobile camera)
         video = document.createElement("video");
@@ -42,57 +34,50 @@ function ARView({ path }) {
                 video.srcObject = stream;
                 video.play();
 
-                // Use video as background texture
+                // Video as background plane
                 videoTexture = new THREE.VideoTexture(video);
-                videoTexture.minFilter = THREE.LinearFilter;
-                videoTexture.magFilter = THREE.LinearFilter;
-                videoTexture.format = THREE.RGBFormat;
-
                 const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
-                const videoGeometry = new THREE.PlaneGeometry(2, 2);
+                const aspect = width / height;
+                const videoGeometry = new THREE.PlaneGeometry(2 * aspect, 2); // full-screen
                 const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
-                videoMesh.position.z = -1; // behind arrows
+                videoMesh.position.z = -1; // always behind arrows
                 scene.add(videoMesh);
             })
             .catch((err) => {
                 console.error("Error accessing camera: ", err);
             });
 
-        // Function to create 3D arrow
-        const createArrow3D = (from, to, color = 0xff0000) => {
-            const dir = new THREE.Vector3(to[1] - from[1], 0, to[0] - from[0]);
+        // 3D Arrows for path
+        path.forEach(([lat, lng], index) => {
+            if (index === 0) return; // skip first
+            const [prevLat, prevLng] = path[index - 1];
+
+            // Calculate direction and distance
+            const dir = new THREE.Vector3(lng - prevLng, 0, lat - prevLat);
             const length = dir.length();
+            const normalizedDir = dir.clone().normalize();
+
+            // Arrow components: cylinder + cone
+            const shaftGeometry = new THREE.CylinderGeometry(0.01, 0.01, length * 0.8, 8);
+            const shaftMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+            shaft.position.y = 0.05;
+            shaft.rotation.z = Math.atan2(normalizedDir.x, normalizedDir.z);
+
+            const headGeometry = new THREE.ConeGeometry(0.03, length * 0.2, 8);
+            const headMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+            head.position.y = 0.05;
+            head.position.z = length * 0.5;
+            head.rotation.z = Math.atan2(normalizedDir.x, normalizedDir.z);
 
             const arrowGroup = new THREE.Group();
+            arrowGroup.add(shaft);
+            arrowGroup.add(head);
 
-            // Shaft
-            const shaftGeo = new THREE.CylinderGeometry(0.03, 0.03, length * 0.8, 12);
-            const shaftMat = new THREE.MeshStandardMaterial({ color });
-            const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
-            shaftMesh.position.y = length * 0.4;
-            arrowGroup.add(shaftMesh);
-
-            // Head
-            const headGeo = new THREE.ConeGeometry(0.06, length * 0.2, 12);
-            const headMat = new THREE.MeshStandardMaterial({ color });
-            const headMesh = new THREE.Mesh(headGeo, headMat);
-            headMesh.position.y = length * 0.9;
-            arrowGroup.add(headMesh);
-
-            // Orient arrow along path
-            const axis = new THREE.Vector3(0, 1, 0); // default up
-            arrowGroup.quaternion.setFromUnitVectors(axis, dir.clone().normalize());
-
-            // Position arrow in front of camera, lower part of feed
-            arrowGroup.position.set(0, -0.5, -0.5);
-
+            // Place arrow at start of segment
+            arrowGroup.position.set(prevLng, 0, prevLat);
             scene.add(arrowGroup);
-        };
-
-        // Render arrows along path
-        path.forEach((point, i) => {
-            if (i === 0) return;
-            createArrow3D(path[i - 1], point);
         });
 
         // Animate
