@@ -2,43 +2,43 @@ import React, { useEffect } from "react";
 import "aframe";
 import "ar.js";
 
-const ARView = ({ pathData }) => {
+const ARView = ({ path }) => {
     useEffect(() => {
-        if (!pathData) return;
+        if (!path || !path.nodes) return;
 
         const sceneEl = document.querySelector("a-scene");
+        if (!sceneEl) return;
 
-        // Clear previous arrows if any
-        const oldArrows = sceneEl.querySelectorAll(".arrow");
-        oldArrows.forEach((el) => el.parentNode.removeChild(el));
+        // Remove old arrows
+        sceneEl.querySelectorAll(".arrow").forEach((el) => el.remove());
 
-        // Loop through path nodes to add arrows
-        for (let i = 0; i < pathData.edges.length; i++) {
-            const [startNode, endNode] = pathData.edges[i];
-            const startCoords = pathData.nodes[startNode];
-            const endCoords = pathData.nodes[endNode];
+        path.edges.forEach(([start, end]) => {
+            const s = path.nodes[start];
+            const e = path.nodes[end];
+            if (!s || !e) return;
 
-            if (!startCoords || !endCoords) continue;
+            const midX = (s[0] + e[0]) / 2;
+            const midZ = (s[1] + e[1]) / 2;
+            const angle = Math.atan2(e[1] - s[1], e[0] - s[0]) * (180 / Math.PI);
 
-            const arrow = document.createElement("a-box");
-            arrow.setAttribute("position", {
-                x: (startCoords[0] + endCoords[0]) / 2,
-                y: 1, // height above ground
-                z: (startCoords[1] + endCoords[1]) / 2,
-            });
-            arrow.setAttribute("rotation", "0 0 0");
-            arrow.setAttribute("scale", "0.2 0.2 0.8");
-            arrow.setAttribute("color", "#ff0000");
+            const arrow = document.createElement("a-entity");
+            arrow.setAttribute(
+                "geometry",
+                "primitive: cone; radiusBottom: 0.2; radiusTop: 0.0; height: 0.6"
+            );
+            arrow.setAttribute("material", "color: red");
+            arrow.setAttribute("position", `${midX} 0 ${midZ}`);
+            arrow.setAttribute("rotation", `0 ${-angle} 0`);
             arrow.classList.add("arrow");
 
             sceneEl.appendChild(arrow);
-        }
-    }, [pathData]);
+        });
+    }, [path]);
 
     return (
         <a-scene
-            embedded
             vr-mode-ui="enabled: false"
+            embedded
             arjs="sourceType: webcam; debugUIEnabled: false;"
             style={{ width: "100%", height: "100vh" }}
         >

@@ -1,79 +1,85 @@
 import React, { useState } from "react";
-import ARView from "./ARView";
 
-function Chatbot() {
+const Chatbot = ({ setShowAR, setPath }) => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState("");
-    const [pathData, setPathData] = useState(null);
 
     const handleSend = async () => {
-        if (!input) return;
+        const userMsg = { text: input, sender: "user" };
+        const newMessages = [...messages, userMsg];
+        setMessages(newMessages);
 
-        // Add user message
-        setMessages(prev => [...prev, { sender: "user", text: input }]);
-
-        // Check if input contains "navigate"
-        if (input.toLowerCase().includes("navigate")) {
+        if (input.toLowerCase().includes("navigate to ece block")) {
             try {
-                const res = await fetch("/mockPath.json"); // fetch from public folder
-                if (!res.ok) throw new Error("HTTP error " + res.status);
+                const res = await fetch("/mockPath.json");
                 const data = await res.json();
-
-                // Update state for pathData (AR)
-                setPathData(data);
-
-                // Bot response
-                setMessages(prev => [
-                    ...prev,
-                    { sender: "bot", text: "Starting navigation..." }
-                ]);
-            } catch (err) {
-                console.error("Failed to fetch mockPath:", err);
-                setMessages(prev => [
-                    ...prev,
-                    { sender: "bot", text: "Failed to start navigation 😢" }
-                ]);
+                setPath(data); // Pass the path data to ARView
+                setShowAR(true);
+            } catch (error) {
+                console.error("Failed to load mockPath.json", error);
             }
         } else {
-            // For other messages
-            setMessages(prev => [
-                ...prev,
-                { sender: "bot", text: "I don't understand 😕" }
-            ]);
+            newMessages.push({ text: "Type 'Navigate to ECE Block' to begin AR mode.", sender: "bot" });
+            setMessages([...newMessages]);
         }
 
         setInput("");
     };
 
-
     return (
-        <div style={{ fontFamily: "Arial", width: "400px", margin: "20px auto" }}>
-            <h2 style={{ textAlign: "center" }}>NavSIT Chatbot</h2>
-            <div style={{ height: "300px", overflowY: "auto", border: "1px solid #ddd", padding: "10px", backgroundColor: "white" }}>
-                {messages.map((m, i) => (
-                    <div key={i} style={{ textAlign: m.sender === "user" ? "right" : "left", margin: "10px 0" }}>
-                        <b>{m.sender === "user" ? "You" : "Bot"}:</b> {m.text}
-                    </div>
+        <div style={{ textAlign: "center", marginTop: "40px" }}>
+            <h2>Campus Navigator</h2>
+            <div
+                style={{
+                    border: "1px solid #ccc",
+                    width: "90%",
+                    margin: "10px auto",
+                    padding: "10px",
+                    height: "50vh",
+                    overflowY: "auto",
+                    borderRadius: "10px",
+                    background: "#f9f9f9",
+                }}
+            >
+                {messages.map((msg, idx) => (
+                    <p
+                        key={idx}
+                        style={{
+                            textAlign: msg.sender === "user" ? "right" : "left",
+                            color: msg.sender === "user" ? "blue" : "green",
+                        }}
+                    >
+                        {msg.text}
+                    </p>
                 ))}
             </div>
-            <div style={{ marginTop: "10px", display: "flex" }}>
-                <input
-                    style={{ flex: 1, padding: "8px", border: "1px solid #ccc", borderRadius: "5px" }}
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    placeholder="Ask me something..."
-                />
-                <button
-                    style={{ marginLeft: "10px", padding: "8px 15px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}
-                    onClick={handleSend}
-                >
-                    Send
-                </button>
-            </div>
-
-            {pathData && <ARView pathData={pathData} />}
+            <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type a message..."
+                style={{
+                    width: "70%",
+                    padding: "8px",
+                    borderRadius: "6px",
+                    border: "1px solid #ccc",
+                }}
+            />
+            <button
+                onClick={handleSend}
+                style={{
+                    padding: "8px 16px",
+                    marginLeft: "10px",
+                    background: "#007bff",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                }}
+            >
+                Send
+            </button>
         </div>
     );
-}
+};
 
 export default Chatbot;
