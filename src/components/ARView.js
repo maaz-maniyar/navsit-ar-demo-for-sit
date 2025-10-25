@@ -6,23 +6,22 @@ function ARView({ path, arrowStyle }) {
     const videoRef = useRef();
 
     useEffect(() => {
-        let renderer, scene, camera, video, videoTexture;
-
+        let renderer, scene, camera, video, videoTexture, arrowGroup;
         const width = window.innerWidth;
         const height = window.innerHeight;
 
-        // Scene & Camera
+        // --- Scene & Camera ---
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
         camera.position.set(0, 1.6, 0);
 
-        // Renderer
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        // --- Renderer ---
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
-        if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
+        mountRef.current?.appendChild(renderer.domElement);
 
-        // Video (mobile camera)
+        // --- Camera Feed ---
         video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
@@ -37,51 +36,77 @@ function ARView({ path, arrowStyle }) {
                 videoTexture = new THREE.VideoTexture(video);
                 scene.background = videoTexture;
             })
-            .catch((err) => console.error("Error accessing camera: ", err));
+            .catch((err) => console.error("Error accessing camera:", err));
 
-        // Arrow group (cone first, then cylinder)
-        const arrowGroup = new THREE.Group();
+        // --- Arrow ---
+        arrowGroup = new THREE.Group();
 
-        // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
         );
-        cone.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-        cone.rotation.x = -Math.PI / 2; // point forward
+        cone.position.y = 0.2;
         arrowGroup.add(cone);
 
-        // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
+            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
-        // Position it slightly behind the cone
-        cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
-        cylinder.rotation.x = -Math.PI / 2; // point forward
+        cylinder.position.y = -0.1;
         arrowGroup.add(cylinder);
 
+        arrowGroup.position.set(0, -0.5, -2);
         camera.add(arrowGroup);
         scene.add(camera);
 
-        // Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(0, 10, 10);
-        scene.add(light);
+        // --- Lighting ---
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(0, 2, 2);
+        scene.add(dirLight);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // Animate
+        // --- Dummy SIT Front Gate target ---
+        const sitFrontGate = new THREE.Vector3(10, 1.6, -20);
+
+        // --- Device Orientation handler ---
+        const handleOrientation = (event) => {
+            const { alpha, beta, gamma } = event; // yaw, pitch, roll
+            if (alpha === null || beta === null || gamma === null) return;
+
+            const euler = new THREE.Euler(
+                THREE.MathUtils.degToRad(beta),
+                THREE.MathUtils.degToRad(alpha),
+                -THREE.MathUtils.degToRad(gamma),
+                "YXZ"
+            );
+            camera.setRotationFromEuler(euler);
+        };
+
+        window.addEventListener("deviceorientation", handleOrientation, true);
+
+        // --- Animation ---
         const animate = () => {
             requestAnimationFrame(animate);
+
+            const localTarget = camera.worldToLocal(sitFrontGate.clone());
+            const direction = new THREE.Vector3().subVectors(localTarget, arrowGroup.position).normalize();
+
+            const targetQuaternion = new THREE.Quaternion();
+            targetQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
+            arrowGroup.quaternion.slerp(targetQuaternion, 0.05);
+
             renderer.render(scene, camera);
         };
         animate();
 
-        // Cleanup
+        // --- Cleanup ---
         return () => {
-            if (mountRef.current) mountRef.current.removeChild(renderer.domElement);
-            if (video && video.srcObject) {
-                video.srcObject.getTracks().forEach((track) => track.stop());
+            window.removeEventListener("deviceorientation", handleOrientation);
+            if (mountRef.current?.contains(renderer.domElement)) {
+                mountRef.current.removeChild(renderer.domElement);
+            }
+            if (video?.srcObject) {
+                video.srcObject.getTracks().forEach((t) => t.stop());
             }
         };
     }, [path, arrowStyle]);
