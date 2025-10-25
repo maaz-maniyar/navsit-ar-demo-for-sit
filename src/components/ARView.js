@@ -4,8 +4,7 @@ import * as THREE from "three";
 function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
-    const [userCoords, setUserCoords] = useState(null);
-    const [deviceHeading, setDeviceHeading] = useState(0);
+    const [heading, setHeading] = useState("No orientation yet");
 
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture, arrowGroup;
@@ -18,7 +17,7 @@ function ARView({ path, arrowStyle }) {
         camera.position.set(0, 1.6, 0);
 
         // --- Renderer ---
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
         mountRef.current?.appendChild(renderer.domElement);
@@ -67,85 +66,45 @@ function ARView({ path, arrowStyle }) {
         scene.add(dirLight);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // --- SIT Front Gate coordinates ---
-        const sitFrontGate = { lat: 13.331748, lon: 77.127378 };
-
-        // --- Track user GPS position ---
-        const watchId = navigator.geolocation.watchPosition(
-            (pos) => {
-                setUserCoords({
-                    lat: pos.coords.latitude,
-                    lon: pos.coords.longitude,
-                });
-            },
-            (err) => console.error("GPS error:", err),
-            { enableHighAccuracy: true, maximumAge: 1000 }
-        );
-
-        // --- Bearing calculation ---
-        const toRad = (deg) => (deg * Math.PI) / 180;
-        const calculateBearing = (lat1, lon1, lat2, lon2) => {
-            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-            const x =
-                Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-            let brng = Math.atan2(y, x);
-            brng = (brng * 180) / Math.PI;
-            return (brng + 360) % 360;
+        // --- Handle device orientation ---
+        const handleOrientation = (event) => {
+            if (event.absolute || event.alpha != null) {
+                setHeading(event.alpha.toFixed(2) + "°");
+                arrowGroup.rotation.y = THREE.MathUtils.degToRad(event.alpha);
+            }
         };
 
-        // --- Handle device orientation with permissions ---
         const requestOrientationPermission = async () => {
-            if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+            if (
+                typeof DeviceOrientationEvent !== "undefined" &&
+                typeof DeviceOrientationEvent.requestPermission === "function"
+            ) {
                 try {
                     const response = await DeviceOrientationEvent.requestPermission();
                     if (response === "granted") {
                         window.addEventListener("deviceorientation", handleOrientation, true);
+                    } else {
+                        console.warn("Orientation permission denied");
                     }
                 } catch (e) {
-                    console.error("Orientation permission denied:", e);
+                    console.error("Orientation permission error:", e);
                 }
             } else {
-                window.addEventListener("deviceorientationabsolute", handleOrientation, true);
                 window.addEventListener("deviceorientation", handleOrientation, true);
-            }
-        };
-
-        const handleOrientation = (event) => {
-            if (event.alpha != null) {
-                // Use alpha (0–360°) as compass heading
-                setDeviceHeading(event.alpha);
             }
         };
 
         requestOrientationPermission();
 
-        // --- Animate ---
         const animate = () => {
             requestAnimationFrame(animate);
-
-            if (userCoords) {
-                const bearingToTarget = calculateBearing(
-                    userCoords.lat,
-                    userCoords.lon,
-                    sitFrontGate.lat,
-                    sitFrontGate.lon
-                );
-
-                // Compute relative rotation
-                const relativeBearing = THREE.MathUtils.degToRad(bearingToTarget - deviceHeading);
-                arrowGroup.rotation.y = relativeBearing;
-            }
-
             renderer.render(scene, camera);
         };
         animate();
 
         // --- Cleanup ---
         return () => {
-            navigator.geolocation.clearWatch(watchId);
             window.removeEventListener("deviceorientation", handleOrientation);
-            window.removeEventListener("deviceorientationabsolute", handleOrientation);
             if (mountRef.current?.contains(renderer.domElement)) {
                 mountRef.current.removeChild(renderer.domElement);
             }
@@ -153,9 +112,26 @@ function ARView({ path, arrowStyle }) {
                 video.srcObject.getTracks().forEach((t) => t.stop());
             }
         };
-    }, [path, arrowStyle]);
+    }, []);
 
-    return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
+    return (
+        <div>
+            <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />
+            <div
+                style={{
+                    position: "absolute",
+                    top: 20,
+                    left: 20,
+                    background: "rgba(0,0,0,0.5)",
+                    color: "white",
+                    padding: "8px",
+                    borderRadius: "8px",
+                }}
+            >
+                Heading: {heading}
+            </div>
+        </div>
+    );
 }
 
 export default ARView;
