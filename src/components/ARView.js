@@ -42,6 +42,7 @@ function ARView({ path, arrowStyle }) {
         // --- Arrow setup ---
         arrowGroup = new THREE.Group();
 
+        // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
@@ -49,6 +50,7 @@ function ARView({ path, arrowStyle }) {
         cone.position.y = 0.2;
         arrowGroup.add(cone);
 
+        // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
             new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
@@ -57,8 +59,7 @@ function ARView({ path, arrowStyle }) {
         arrowGroup.add(cylinder);
 
         arrowGroup.position.set(0, -0.5, -2);
-        camera.add(arrowGroup);
-        scene.add(camera);
+        scene.add(arrowGroup); // <— note: attach to scene, not camera
 
         // --- Lighting ---
         const dirLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -66,11 +67,15 @@ function ARView({ path, arrowStyle }) {
         scene.add(dirLight);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // --- Handle device orientation ---
+        // --- Orientation Handling ---
         const handleOrientation = (event) => {
             if (event.absolute || event.alpha != null) {
-                setHeading(event.alpha.toFixed(2) + "°");
-                arrowGroup.rotation.y = THREE.MathUtils.degToRad(event.alpha);
+                const alpha = event.alpha; // 0–360°
+                setHeading(alpha.toFixed(1) + "°");
+
+                // Convert compass heading to radians and invert so it matches camera orientation
+                const rotationY = THREE.MathUtils.degToRad(-alpha);
+                arrowGroup.rotation.set(0, rotationY, 0);
             }
         };
 
