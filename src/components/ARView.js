@@ -34,53 +34,38 @@ function ARView({ path }) {
             .then((stream) => {
                 video.srcObject = stream;
                 video.play();
-
-                // Use video as scene background
                 videoTexture = new THREE.VideoTexture(video);
                 scene.background = videoTexture;
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Scale path coordinates for visibility
-        const baseLat = path.length > 0 ? path[0][0] : 0;
-        const baseLng = path.length > 0 ? path[0][1] : 0;
-        const SCALE = 50;
-
-        // 3D Arrows
+        // 3D Arrows in front of camera
         const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
         const arrowGroup = new THREE.Group();
 
-        for (let i = 1; i < path.length; i++) {
-            const [prevLat, prevLng] = path[i - 1];
-            const [lat, lng] = path[i];
+        path.forEach((_, i) => {
+            if (i === 0) return;
 
-            const x1 = (prevLng - baseLng) * SCALE;
-            const z1 = (prevLat - baseLat) * SCALE;
-            const x2 = (lng - baseLng) * SCALE;
-            const z2 = (lat - baseLat) * SCALE;
-
-            const start = new THREE.Vector3(x1, 0, z1);
-            const end = new THREE.Vector3(x2, 0, z2);
-            const dir = new THREE.Vector3().subVectors(end, start);
-            const length = dir.length();
-
-            // Cone for arrow head
-            const coneGeometry = new THREE.ConeGeometry(0.1, 0.3, 16);
-            const cone = new THREE.Mesh(coneGeometry, arrowMaterial);
-            cone.position.copy(start.clone().add(dir.clone().multiplyScalar(0.9)));
-            cone.lookAt(end);
+            // Create arrow pointing forward
+            const cone = new THREE.Mesh(
+                new THREE.ConeGeometry(0.05, 0.2, 16),
+                arrowMaterial
+            );
+            cone.position.set(0, 0.5, -0.5 * i); // gradually in front of camera
+            cone.rotation.x = -Math.PI / 2; // point forward
             arrowGroup.add(cone);
 
-            // Cylinder for shaft
-            const cylinderGeometry = new THREE.CylinderGeometry(0.05, 0.05, length * 0.9, 16);
-            const cylinder = new THREE.Mesh(cylinderGeometry, arrowMaterial);
-            cylinder.position.copy(start.clone().add(dir.clone().multiplyScalar(0.45)));
-            cylinder.lookAt(end);
-            cylinder.rotateX(Math.PI / 2);
+            const cylinder = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
+                arrowMaterial
+            );
+            cylinder.position.set(0, 0.35, -0.5 * i);
+            cylinder.rotation.x = -Math.PI / 2;
             arrowGroup.add(cylinder);
-        }
+        });
 
-        scene.add(arrowGroup);
+        camera.add(arrowGroup);
+        scene.add(camera);
 
         // Lighting
         const light = new THREE.DirectionalLight(0xffffff, 1);
