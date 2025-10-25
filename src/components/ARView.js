@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
 function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
+    const [userCoords, setUserCoords] = useState(null);
 
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture, arrowGroup;
@@ -38,9 +39,10 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera:", err));
 
-        // --- Arrow ---
+        // --- Arrow setup (cone first, then cylinder) ---
         arrowGroup = new THREE.Group();
 
+        // Cone (tip) → black
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
@@ -48,6 +50,7 @@ function ARView({ path, arrowStyle }) {
         cone.position.y = 0.2;
         arrowGroup.add(cone);
 
+        // Cylinder (stem) → white
         const cylinder = new THREE.Mesh(
             new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
@@ -55,6 +58,7 @@ function ARView({ path, arrowStyle }) {
         cylinder.position.y = -0.1;
         arrowGroup.add(cylinder);
 
+        // Place arrow at bottom of screen, facing forward
         arrowGroup.position.set(0, -0.5, -2);
         camera.add(arrowGroup);
         scene.add(camera);
@@ -65,35 +69,60 @@ function ARView({ path, arrowStyle }) {
         scene.add(dirLight);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // --- Dummy SIT Front Gate target ---
-        const sitFrontGate = new THREE.Vector3(10, 1.6, -20);
+        // --- SIT Front Gate coordinates ---
+        const sitFrontGate = { lat: 13.331748, lon: 77.127378 };
 
-        // --- Device Orientation handler ---
-        const handleOrientation = (event) => {
-            const { alpha, beta, gamma } = event; // yaw, pitch, roll
-            if (alpha === null || beta === null || gamma === null) return;
+        // --- Track user GPS position ---
+        const watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                setUserCoords({
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                });
+            },
+            (err) => console.error("GPS error:", err),
+            { enableHighAccuracy: true, maximumAge: 1000 }
+        );
 
-            const euler = new THREE.Euler(
-                THREE.MathUtils.degToRad(beta),
-                THREE.MathUtils.degToRad(alpha),
-                -THREE.MathUtils.degToRad(gamma),
-                "YXZ"
-            );
-            camera.setRotationFromEuler(euler);
+        // --- Bearing calculation between two GPS points ---
+        const calculateBearing = (lat1, lon1, lat2, lon2) => {
+            const toRad = (deg) => (deg * Math.PI) / 180;
+            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+            const x =
+                Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+            let brng = Math.atan2(y, x);
+            brng = (brng * 180) / Math.PI;
+            return (brng + 360) % 360; // Normalize to 0–360
         };
 
+        // --- Handle device orientation ---
+        let deviceHeading = 0;
+        const handleOrientation = (event) => {
+            if (event.absolute && event.alpha !== null) {
+                deviceHeading = event.alpha;
+            }
+        };
+        window.addEventListener("deviceorientationabsolute", handleOrientation, true);
         window.addEventListener("deviceorientation", handleOrientation, true);
 
-        // --- Animation ---
+        // --- Animate ---
         const animate = () => {
             requestAnimationFrame(animate);
 
-            const localTarget = camera.worldToLocal(sitFrontGate.clone());
-            const direction = new THREE.Vector3().subVectors(localTarget, arrowGroup.position).normalize();
+            if (userCoords) {
+                // Calculate bearing from user → SIT Front Gate
+                const bearingToTarget = calculateBearing(
+                    userCoords.lat,
+                    userCoords.lon,
+                    sitFrontGate.lat,
+                    sitFrontGate.lon
+                );
 
-            const targetQuaternion = new THREE.Quaternion();
-            targetQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
-            arrowGroup.quaternion.slerp(targetQuaternion, 0.05);
+                // Determine arrow rotation relative to device heading
+                const relativeBearing = THREE.MathUtils.degToRad(bearingToTarget - deviceHeading);
+                arrowGroup.rotation.y = relativeBearing;
+            }
 
             renderer.render(scene, camera);
         };
@@ -101,7 +130,9 @@ function ARView({ path, arrowStyle }) {
 
         // --- Cleanup ---
         return () => {
+            navigator.geolocation.clearWatch(watchId);
             window.removeEventListener("deviceorientation", handleOrientation);
+            window.removeEventListener("deviceorientationabsolute", handleOrientation);
             if (mountRef.current?.contains(renderer.domElement)) {
                 mountRef.current.removeChild(renderer.domElement);
             }
