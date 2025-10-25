@@ -6,7 +6,7 @@ function ARView({ path, arrowStyle }) {
     const videoRef = useRef();
 
     useEffect(() => {
-        let renderer, scene, camera, video, videoTexture, arrowGroup;
+        let renderer, scene, camera, video, videoTexture;
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -40,7 +40,7 @@ function ARView({ path, arrowStyle }) {
             .catch((err) => console.error("Error accessing camera: ", err));
 
         // Arrow group (cone first, then cylinder)
-        arrowGroup = new THREE.Group();
+        const arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
         const cone = new THREE.Mesh(
@@ -60,8 +60,19 @@ function ARView({ path, arrowStyle }) {
         cylinder.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cylinder);
 
+        // Add arrow to camera
         camera.add(arrowGroup);
         scene.add(camera);
+
+        // --- Safe arrow rotation toward next node ---
+        if (path && path.length > 1) {
+            const start = path[0];
+            const end = path[1];
+            const dx = end.lng - start.lng;
+            const dz = end.lat - start.lat;
+            const angle = Math.atan2(dx, dz); // rotation around Y-axis
+            arrowGroup.rotation.set(-Math.PI / 2, angle, 0); // maintain forward orientation
+        }
 
         // Lighting
         const light = new THREE.DirectionalLight(0xffffff, 1);
@@ -72,18 +83,6 @@ function ARView({ path, arrowStyle }) {
         // Animate
         const animate = () => {
             requestAnimationFrame(animate);
-
-            // --- Arrow direction update ---
-            if (path && path.length > 1) {
-                const start = path[0]; // current node
-                const end = path[1];   // next node
-                const dir = new THREE.Vector3(end.lng - start.lng, 0, end.lat - start.lat).normalize();
-
-                // Point the arrowGroup toward the next node
-                const arrowPos = new THREE.Vector3(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-                arrowGroup.lookAt(arrowPos.clone().add(dir));
-            }
-
             renderer.render(scene, camera);
         };
         animate();
