@@ -1,15 +1,12 @@
 import React, { useEffect } from "react";
 import "aframe";
-import "ar.js";
 
 const ARView = ({ path }) => {
     useEffect(() => {
-        if (!path || !path.nodes) return;
-
         const sceneEl = document.querySelector("a-scene");
-        if (!sceneEl) return;
+        if (!sceneEl || !path?.nodes) return;
 
-        // Remove old arrows
+        // Remove existing arrows
         sceneEl.querySelectorAll(".arrow").forEach((el) => el.remove());
 
         path.edges.forEach(([start, end]) => {
@@ -36,14 +33,19 @@ const ARView = ({ path }) => {
     }, [path]);
 
     return (
-        <a-scene
-            vr-mode-ui="enabled: false"
-            embedded
-            arjs="sourceType: webcam; debugUIEnabled: false;"
-            style={{ width: "100%", height: "100vh" }}
-        >
-            <a-entity camera></a-entity>
-        </a-scene>
+        <>
+            {/* Load AR.js from CDN */}
+            <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@master/aframe/build/aframe-ar.js"></script>
+
+            <a-scene
+                vr-mode-ui="enabled: false"
+                embedded
+                arjs="sourceType: webcam; debugUIEnabled: false;"
+                style={{ width: "100%", height: "100vh" }}
+            >
+                <a-entity camera></a-entity>
+            </a-scene>
+        </>
     );
 };
 
