@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-function ARView({ path }) {
+function ARView({ path, arrowStyle }) { // arrowStyle lets you customize later
     const mountRef = useRef();
     const videoRef = useRef();
 
@@ -39,27 +39,32 @@ function ARView({ path }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // 3D Arrows in front of camera
-        const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        // Arrow style (default)
+        const material = new THREE.MeshStandardMaterial({ color: arrowStyle?.color || 0xff0000 });
         const arrowGroup = new THREE.Group();
 
         path.forEach((_, i) => {
             if (i === 0) return;
 
-            // Create arrow pointing forward
+            // Position arrows near the bottom of the screen
+            const yPos = arrowStyle?.y || -0.5; // negative = bottom
+            const zSpacing = arrowStyle?.zSpacing || -0.5;
+
+            // Cone tip
             const cone = new THREE.Mesh(
                 new THREE.ConeGeometry(0.05, 0.2, 16),
-                arrowMaterial
+                material
             );
-            cone.position.set(0, 0.5, -0.5 * i); // gradually in front of camera
-            cone.rotation.x = -Math.PI / 2; // point forward
+            cone.position.set(0, yPos + 0.15, zSpacing * i);
+            cone.rotation.x = -Math.PI / 2;
             arrowGroup.add(cone);
 
+            // Cylinder stem
             const cylinder = new THREE.Mesh(
                 new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
-                arrowMaterial
+                material
             );
-            cylinder.position.set(0, 0.35, -0.5 * i);
+            cylinder.position.set(0, yPos, zSpacing * i);
             cylinder.rotation.x = -Math.PI / 2;
             arrowGroup.add(cylinder);
         });
@@ -87,7 +92,7 @@ function ARView({ path }) {
                 video.srcObject.getTracks().forEach((track) => track.stop());
             }
         };
-    }, [path]);
+    }, [path, arrowStyle]);
 
     return <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />;
 }
