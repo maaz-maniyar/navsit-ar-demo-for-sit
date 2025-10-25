@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-function ARView({ path, arrowStyle }) { // arrowStyle lets you customize later
+function ARView({ path, arrowStyle }) {
     const mountRef = useRef();
     const videoRef = useRef();
 
@@ -39,35 +39,27 @@ function ARView({ path, arrowStyle }) { // arrowStyle lets you customize later
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow style (default)
+        // Arrow group with one cylinder + one cone
         const material = new THREE.MeshStandardMaterial({ color: arrowStyle?.color || 0xff0000 });
         const arrowGroup = new THREE.Group();
 
-        path.forEach((_, i) => {
-            if (i === 0) return;
+        // Cylinder (stem)
+        const cylinder = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
+            material
+        );
+        cylinder.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+        cylinder.rotation.x = -Math.PI / 2;
+        arrowGroup.add(cylinder);
 
-            // Position arrows near the bottom of the screen
-            const yPos = arrowStyle?.y || -0.5; // negative = bottom
-            const zSpacing = arrowStyle?.zSpacing || -0.5;
-
-            // Cone tip
-            const cone = new THREE.Mesh(
-                new THREE.ConeGeometry(0.05, 0.2, 16),
-                material
-            );
-            cone.position.set(0, yPos + 0.15, zSpacing * i);
-            cone.rotation.x = -Math.PI / 2;
-            arrowGroup.add(cone);
-
-            // Cylinder stem
-            const cylinder = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.02, 0.02, 0.3, 16),
-                material
-            );
-            cylinder.position.set(0, yPos, zSpacing * i);
-            cylinder.rotation.x = -Math.PI / 2;
-            arrowGroup.add(cylinder);
-        });
+        // Cone (tip)
+        const cone = new THREE.Mesh(
+            new THREE.ConeGeometry(0.05, 0.2, 16),
+            material
+        );
+        cone.position.set(0, (arrowStyle?.y || -0.5) + 0.15, arrowStyle?.z || -1);
+        cone.rotation.x = -Math.PI / 2;
+        arrowGroup.add(cone);
 
         camera.add(arrowGroup);
         scene.add(camera);
