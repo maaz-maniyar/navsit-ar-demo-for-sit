@@ -39,7 +39,7 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow group (cone + cylinder)
+        // Arrow group (cone first, then cylinder)
         const arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
@@ -56,6 +56,7 @@ function ARView({ path, arrowStyle }) {
             new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
+        // Position it slightly behind the cone
         cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
         cylinder.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cylinder);
@@ -68,21 +69,6 @@ function ARView({ path, arrowStyle }) {
         light.position.set(0, 10, 10);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-
-        // Function to update arrow rotation toward next node
-        const updateArrowDirection = () => {
-            if (!path || path.length < 2) return;
-
-            const [start, target] = path;
-            const dx = target[1] - start[1]; // lng difference
-            const dz = target[0] - start[0]; // lat difference
-
-            // Calculate angle in XZ-plane
-            const angle = Math.atan2(dx, dz); // rotation around Y axis
-            arrowGroup.rotation.y = -angle; // rotate arrow to face target
-        };
-
-        updateArrowDirection();
 
         // Animate
         const animate = () => {
