@@ -39,7 +39,7 @@ function ARView({ path, arrowStyle }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
-        // Arrow group (cone first, then cylinder)
+        // Arrow group (cone + cylinder)
         const arrowGroup = new THREE.Group();
 
         // Cone (tip) → black
@@ -47,8 +47,8 @@ function ARView({ path, arrowStyle }) {
             new THREE.ConeGeometry(0.05, 0.2, 16),
             new THREE.MeshStandardMaterial({ color: 0x000000 })
         );
-        cone.position.set(0, 0.15, 0); // relative to arrowGroup
-        cone.rotation.x = -Math.PI / 2;
+        cone.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
+        cone.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cone);
 
         // Cylinder (stem) → white
@@ -56,30 +56,33 @@ function ARView({ path, arrowStyle }) {
             new THREE.CylinderGeometry(0.02, 0.02, 0.25, 16),
             new THREE.MeshStandardMaterial({ color: 0xffffff })
         );
-        cylinder.position.set(0, -0.125, 0); // relative to arrowGroup
-        cylinder.rotation.x = -Math.PI / 2;
+        cylinder.position.set(0, (arrowStyle?.y || -0.5) - 0.125, arrowStyle?.z || -1);
+        cylinder.rotation.x = -Math.PI / 2; // point forward
         arrowGroup.add(cylinder);
 
-        // Position arrow in front of the camera, bottom of screen
-        arrowGroup.position.set(0, arrowStyle?.y || -0.5, arrowStyle?.z || -1);
-
-        // Rotate arrow toward next node if path exists
-        if (path && path.length > 1) {
-            const start = path[0];
-            const end = path[1];
-            const dx = end.lng - start.lng;
-            const dz = end.lat - start.lat;
-            const angle = Math.atan2(dx, dz);
-            arrowGroup.rotation.y = angle;
-        }
-
-        scene.add(arrowGroup);
+        camera.add(arrowGroup);
+        scene.add(camera);
 
         // Lighting
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(0, 10, 10);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        // Function to update arrow rotation toward next node
+        const updateArrowDirection = () => {
+            if (!path || path.length < 2) return;
+
+            const [start, target] = path;
+            const dx = target[1] - start[1]; // lng difference
+            const dz = target[0] - start[0]; // lat difference
+
+            // Calculate angle in XZ-plane
+            const angle = Math.atan2(dx, dz); // rotation around Y axis
+            arrowGroup.rotation.y = -angle; // rotate arrow to face target
+        };
+
+        updateArrowDirection();
 
         // Animate
         const animate = () => {
