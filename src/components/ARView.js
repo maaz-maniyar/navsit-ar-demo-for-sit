@@ -6,31 +6,29 @@ function ARView({ arrowStyle, backendUrl }) {
     const videoRef = useRef();
     const arrowGroupRef = useRef();
     const [userCoords, setUserCoords] = useState(null);
-    const [targetCoords, setTargetCoords] = useState({ lat: 13.331748, lng: 77.127378 }); // default SIT Front Gate
+    const [targetCoords, setTargetCoords] = useState({ lat: 13.331748, lng: 77.127378 });
     const [chatInput, setChatInput] = useState("");
     const [chatHistory, setChatHistory] = useState([]);
 
-    // Fetch the dynamic target from backend periodically
+    // 🔹 Fetch dynamic target from backend
     useEffect(() => {
         const fetchTarget = async () => {
             try {
                 const res = await fetch(`${backendUrl}/next-node`);
                 const data = await res.json();
-                if (data.lat && data.lng) {
-                    setTargetCoords({ lat: data.lat, lng: data.lng });
-                }
+                if (data.lat && data.lng) setTargetCoords({ lat: data.lat, lng: data.lng });
             } catch (err) {
                 console.error("Error fetching target node:", err);
             }
         };
         fetchTarget();
-        const interval = setInterval(fetchTarget, 5000); // refresh every 5s
+        const interval = setInterval(fetchTarget, 5000);
         return () => clearInterval(interval);
     }, [backendUrl]);
 
-    // Send chat message to backend
+    // 🔹 Send chat message
     const sendMessage = async () => {
-        if (!chatInput) return;
+        if (!chatInput.trim()) return;
         try {
             const res = await fetch(`${backendUrl}/chat`, {
                 method: "POST",
@@ -38,16 +36,16 @@ function ARView({ arrowStyle, backendUrl }) {
                 body: JSON.stringify({ message: chatInput }),
             });
             const data = await res.json();
-            setChatHistory((prev) => [...prev, { user: chatInput, bot: data.reply || "" }]);
+            setChatHistory((prev) => [...prev, { user: chatInput, bot: data.reply || "..." }]);
             setChatInput("");
         } catch (err) {
             console.error("Error sending message:", err);
         }
     };
 
-    // ----------------------
-    // Original AR logic starts here (untouched)
-    // ----------------------
+    // ---------------------------
+    // ORIGINAL AR LOGIC (untouched)
+    // ---------------------------
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture;
         const width = window.innerWidth;
@@ -97,7 +95,7 @@ function ARView({ arrowStyle, backendUrl }) {
 
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
-            new THREE.MeshStandardMaterial({ color: 0x000000 })
+            new THREE.MeshStandardMaterial({ color: 0xff4757 }) // bright red tip
         );
         cone.position.set(0, 0, -0.225);
         cone.rotation.x = -Math.PI / 2;
@@ -186,54 +184,77 @@ function ARView({ arrowStyle, backendUrl }) {
             window.removeEventListener("deviceorientation", handleOrientation);
         };
     }, [arrowStyle, userCoords, targetCoords, backendUrl]);
-    // ----------------------
-    // Original AR logic ends here
-    // ----------------------
+    // ---------------------------
 
     return (
         <>
             <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />
-            {/* Chatbox overlay */}
+
+            {/* 🔹 Floating glass chat UI */}
             <div
                 style={{
                     position: "absolute",
-                    bottom: 20,
+                    bottom: 30,
                     left: "50%",
                     transform: "translateX(-50%)",
-                    background: "rgba(255, 255, 255, 0.85)",
-                    borderRadius: 12,
-                    padding: 10,
+                    background: "rgba(255, 255, 255, 0.15)",
+                    backdropFilter: "blur(10px)",
+                    border: "1px solid rgba(255,255,255,0.3)",
+                    borderRadius: "16px",
+                    padding: "12px",
                     width: "90%",
-                    maxWidth: 400,
-                    boxShadow: "0 4px 8px rgba(0,0,0,0.2)",
+                    maxWidth: 420,
+                    color: "#fff",
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
                 }}
             >
-                <div style={{ maxHeight: 150, overflowY: "auto", marginBottom: 8 }}>
+                <div
+                    style={{
+                        maxHeight: 150,
+                        overflowY: "auto",
+                        marginBottom: 10,
+                        padding: "4px 8px",
+                    }}
+                >
                     {chatHistory.map((c, i) => (
-                        <div key={i}>
-                            <strong>You:</strong> {c.user} <br />
-                            <strong>Bot:</strong> {c.bot}
+                        <div key={i} style={{ marginBottom: 6 }}>
+                            <div style={{ color: "#ffeaa7" }}>🧍‍♂️ {c.user}</div>
+                            <div style={{ color: "#74b9ff" }}>🤖 {c.bot}</div>
                         </div>
                     ))}
                 </div>
+
                 <div style={{ display: "flex", gap: 8 }}>
                     <input
                         type="text"
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
-                        placeholder="Type a message..."
-                        style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #ccc" }}
+                        placeholder="Ask or send a command..."
+                        style={{
+                            flex: 1,
+                            padding: "10px 12px",
+                            borderRadius: "10px",
+                            border: "1px solid rgba(255,255,255,0.3)",
+                            background: "rgba(255,255,255,0.2)",
+                            color: "#fff",
+                            outline: "none",
+                        }}
                     />
                     <button
                         onClick={sendMessage}
                         style={{
-                            background: "#007bff",
+                            background: "linear-gradient(135deg, #00b894, #00cec9)",
                             color: "#fff",
                             border: "none",
-                            borderRadius: 6,
-                            padding: "8px 12px",
+                            borderRadius: "10px",
+                            padding: "10px 14px",
+                            fontWeight: "bold",
                             cursor: "pointer",
+                            boxShadow: "0 3px 8px rgba(0,0,0,0.3)",
+                            transition: "0.3s",
                         }}
+                        onMouseOver={(e) => (e.target.style.opacity = 0.9)}
+                        onMouseOut={(e) => (e.target.style.opacity = 1)}
                     >
                         Send
                     </button>
