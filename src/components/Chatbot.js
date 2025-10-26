@@ -7,6 +7,22 @@ function Chatbot({ setShowAR, setPath }) {
     ]);
     const [loading, setLoading] = useState(false);
 
+    // Get user GPS location
+    const getLocation = () => {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) reject("Geolocation not supported");
+            else {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => resolve({
+                        latitude: pos.coords.latitude,
+                        longitude: pos.coords.longitude
+                    }),
+                    (err) => reject(err)
+                );
+            }
+        });
+    };
+
     const handleSend = async () => {
         if (!message.trim()) return;
         const userMessage = message.trim();
@@ -15,28 +31,37 @@ function Chatbot({ setShowAR, setPath }) {
         setLoading(true);
 
         try {
+            const coords = await getLocation().catch(() => null); // if GPS fails, send nulls
             const res = await fetch("http://localhost:8080/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: userMessage }),
+                body: JSON.stringify({
+                    message: userMessage,
+                    latitude: coords?.latitude,
+                    longitude: coords?.longitude
+                }),
             });
 
             if (!res.ok) throw new Error("Backend error");
             const data = await res.json();
 
-            if (data.type === "navigation") {
+            // If backend returns next node for navigation
+            if (data.nextNode) {
                 setChatHistory((prev) => [
                     ...prev,
-                    { sender: "bot", text: `Navigating to ${data.destination}...` }
+                    { sender: "bot", text: `Navigating to ${data.nextNode.name}...` }
                 ]);
-                setPath(data.path);
+                setPath([data.nextNode]);
                 setShowAR(true);
-            } else if (data.type === "text") {
+            }
+            // Else normal chat reply
+            else if (data.reply) {
                 setChatHistory((prev) => [
                     ...prev,
                     { sender: "bot", text: data.reply }
                 ]);
-            } else {
+            }
+            else {
                 setChatHistory((prev) => [
                     ...prev,
                     { sender: "bot", text: "I'm not sure how to respond to that." }
@@ -66,7 +91,7 @@ function Chatbot({ setShowAR, setPath }) {
                 position: "relative",
             }}
         >
-            {/* Header section */}
+            {/* Header */}
             <div
                 style={{
                     display: "flex",
@@ -77,7 +102,7 @@ function Chatbot({ setShowAR, setPath }) {
             >
                 <h2 style={{ color: "#4CAF50", margin: 0 }}>NavSIT</h2>
                 <img
-                    src="/assets/SITLogo.jpg"
+                    src="/SITLogo.jpg"
                     alt="SIT Logo"
                     style={{
                         height: "45px",
@@ -125,7 +150,7 @@ function Chatbot({ setShowAR, setPath }) {
                 {loading && <p style={{ opacity: 0.6 }}>Thinking...</p>}
             </div>
 
-            {/* Input bar */}
+            {/* Input */}
             <div style={{ display: "flex", marginTop: "1rem" }}>
                 <input
                     value={message}
@@ -153,8 +178,9 @@ function Chatbot({ setShowAR, setPath }) {
                         border: "none",
                         cursor: "pointer"
                     }}
+                    disabled={loading}
                 >
-                    Send
+                    {loading ? "..." : "Send"}
                 </button>
             </div>
         </div>
