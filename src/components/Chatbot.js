@@ -32,7 +32,7 @@ function Chatbot({ setShowAR, setPath }) {
 
         try {
             const coords = await getLocation().catch(() => null); // if GPS fails, send nulls
-            const res = await fetch("http://localhost:8080/api/chat", {
+            const res = await fetch("https://navsit-backend-production.up.railway.app/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
