@@ -10,25 +10,38 @@ function ARView({ arrowStyle, path }) {
     const [targetCoords, setTargetCoords] = useState({ lat: 13.331748, lng: 77.127378 });
     const [chatInput, setChatInput] = useState("");
     const [chatHistory, setChatHistory] = useState([]);
+    const [cameraStopped, setCameraStopped] = useState(false); // ✅ new
 
-    // 🔹 Fetch dynamic target from backend every 5s by POSTing current position
+    // helper to calculate distance
+    const getDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3; // metres
+        const φ1 = (lat1 * Math.PI) / 180;
+        const φ2 = (lat2 * Math.PI) / 180;
+        const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+        const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+        const a =
+            Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    };
+
+    // 🔹 Fetch dynamic target from backend every 5s
     useEffect(() => {
         let interval;
         const fetchTarget = async () => {
             try {
-                if (!userCoords) return; // wait until we have GPS
+                if (!userCoords) return;
                 const res = await fetch(`${BASE_URL}/chat/update-node`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ latitude: userCoords.lat, longitude: userCoords.lng }),
                 });
                 const data = await res.json();
-                // backend returns nextCoordinates (array) or nextNode name
                 if (data.nextCoordinates && Array.isArray(data.nextCoordinates)) {
                     setTargetCoords({ lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] });
                 } else if (data.nextNode && typeof data.nextNode === "string") {
-                    // If only name given, we might request coordinates from /api/nodes or rely on previous path
-                    // Try to fetch node coordinates
                     const nodesRes = await fetch(`${BASE_URL.replace('/api','')}/api/nodes`);
                     if (nodesRes.ok) {
                         const nodes = await nodesRes.json();
@@ -41,15 +54,12 @@ function ARView({ arrowStyle, path }) {
                 console.error("Error fetching target node:", err);
             }
         };
-
         interval = setInterval(fetchTarget, 5000);
-        // also run immediately once (but only if we have coords)
         fetchTarget();
-
         return () => clearInterval(interval);
     }, [userCoords]);
 
-    // 🔹 Send chat message (small chat UI inside ARView)
+    // 🔹 Send chat message
     const sendMessage = async () => {
         if (!chatInput.trim()) return;
         try {
@@ -95,12 +105,13 @@ function ARView({ arrowStyle, path }) {
         video.style.display = "none";
         videoRef.current = video;
 
+        // ✅ prevent multiple restarts
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" }, audio: false })
             .then((stream) => {
+                if (cameraStopped) return; // ✅ don’t restart if already stopped
                 video.srcObject = stream;
                 video.play();
-
                 videoTexture = new THREE.VideoTexture(video);
                 videoTexture.minFilter = THREE.LinearFilter;
                 videoTexture.magFilter = THREE.LinearFilter;
@@ -123,7 +134,7 @@ function ARView({ arrowStyle, path }) {
 
         const cone = new THREE.Mesh(
             new THREE.ConeGeometry(0.05, 0.2, 16),
-            new THREE.MeshStandardMaterial({ color: 0xff4757 }) // bright red tip
+            new THREE.MeshStandardMaterial({ color: 0xff4757 })
         );
         cone.position.set(0, 0, -0.225);
         cone.rotation.x = -Math.PI / 2;
@@ -164,12 +175,9 @@ function ARView({ arrowStyle, path }) {
                 const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
                 const beta = THREE.MathUtils.degToRad(event.beta || 0);
                 const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
-                const cA = Math.cos(alpha),
-                    sA = Math.sin(alpha);
-                const cB = Math.cos(beta),
-                    sB = Math.sin(beta);
-                const cG = Math.cos(gamma),
-                    sG = Math.sin(gamma);
+                const cA = Math.cos(alpha), sA = Math.sin(alpha);
+                const cB = Math.cos(beta), sB = Math.sin(beta);
+                const cG = Math.cos(gamma), sG = Math.sin(gamma);
                 const Vx = -cA * sG - sA * sB * cG;
                 const Vy = -sA * sG + cA * sB * cG;
                 heading = Math.atan(Vx / Vy);
@@ -198,6 +206,17 @@ function ARView({ arrowStyle, path }) {
                         targetCoords.lng
                     );
                     arrowGroupRef.current.rotation.y = bearing - deviceHeading;
+
+                    // ✅ Stop camera when destination is close (< 10m)
+                    const dist = getDistance(userCoords.lat, userCoords.lng, targetCoords.lat, targetCoords.lng);
+                    if (dist < 10 && !cameraStopped) {
+                        if (video.srcObject) {
+                            video.srcObject.getTracks().forEach((t) => t.stop());
+                            video.srcObject = null;
+                            setCameraStopped(true);
+                            console.log("📷 Camera stopped: Destination reached!");
+                        }
+                    }
                 }
                 if (videoTexture) videoTexture.needsUpdate = true;
                 renderer.render(scene, camera);
@@ -211,13 +230,28 @@ function ARView({ arrowStyle, path }) {
             navigator.geolocation.clearWatch(geoWatch);
             window.removeEventListener("deviceorientation", handleOrientation);
         };
-    }, [arrowStyle, userCoords, targetCoords]);
-    // ---------------------------
+    }, [arrowStyle, userCoords, targetCoords, cameraStopped]); // ✅ added cameraStopped dependency
 
     return (
         <>
             <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />
-
+            {cameraStopped && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: "20px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        background: "rgba(0,0,0,0.6)",
+                        color: "white",
+                        padding: "12px 20px",
+                        borderRadius: "8px",
+                        fontWeight: "bold",
+                    }}
+                >
+                    🎯 You’ve reached the SIT Front Gate
+                </div>
+            )}
             {/* 🔹 Floating glass chat UI */}
             <div
                 style={{
@@ -293,4 +327,3 @@ function ARView({ arrowStyle, path }) {
 }
 
 export default ARView;
-
