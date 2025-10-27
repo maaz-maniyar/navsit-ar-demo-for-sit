@@ -12,6 +12,16 @@ function ARView({ arrowStyle, path }) {
     const [chatHistory, setChatHistory] = useState([]);
     const [cameraStopped, setCameraStopped] = useState(false);
 
+    // --- New UI flags ---
+    const [trackingHealthy, setTrackingHealthy] = useState(true); // for fallback compass
+    const [distanceToTarget, setDistanceToTarget] = useState(null);
+
+    // --- Constants / thresholds ---
+    const SKIP_THRESHOLD = 10; // meters: skip nodes closer than this
+    const TURN_ALERT_DIST = 12; // meters: vibrate for approaching turn
+    const ARRIVAL_THRESHOLD = 8; // meters: arrival
+    const SIGNIFICANT_BEARING_CHANGE = (10 * Math.PI) / 180; // 10 degrees in radians
+
     // 🔹 Utility: distance between two lat/lngs
     const getDistance = (lat1, lon1, lat2, lon2) => {
         const R = 6371e3;
@@ -44,19 +54,26 @@ function ARView({ arrowStyle, path }) {
 
                 setUserCoords({ lat: avgLat, lng: avgLng });
             },
-            (err) => console.error(err),
+            (err) => {
+                console.error(err);
+                setTrackingHealthy(false);
+            },
             { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
         );
 
         return () => navigator.geolocation.clearWatch(geoWatch);
     }, []);
 
-    // 🔹 Fetch dynamic next node every 5 seconds
+    // 🔹 Fetch dynamic next node every 5 seconds (with node-skipping logic)
     useEffect(() => {
         let interval;
         const fetchTarget = async () => {
             try {
-                if (!userCoords) return;
+                if (!userCoords) {
+                    setTrackingHealthy(false);
+                    return;
+                }
+                setTrackingHealthy(true);
                 const res = await fetch(`${BASE_URL}/chat/update-node`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -67,25 +84,54 @@ function ARView({ arrowStyle, path }) {
                 });
                 const data = await res.json();
 
+                // Prefer numeric coordinates if present
+                let candidateCoords = null;
                 if (data.nextCoordinates && Array.isArray(data.nextCoordinates)) {
-                    setTargetCoords({
-                        lat: data.nextCoordinates[0],
-                        lng: data.nextCoordinates[1],
-                    });
+                    candidateCoords = { lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] };
                 } else if (data.nextNode && typeof data.nextNode === "string") {
+                    // fetch coordinates by node name
                     const nodesRes = await fetch(`${BASE_URL.replace("/api", "")}/api/nodes`);
                     if (nodesRes.ok) {
                         const nodes = await nodesRes.json();
                         if (nodes[data.nextNode]) {
-                            setTargetCoords({
-                                lat: nodes[data.nextNode][0],
-                                lng: nodes[data.nextNode][1],
-                            });
+                            candidateCoords = { lat: nodes[data.nextNode][0], lng: nodes[data.nextNode][1] };
                         }
                     }
                 }
+
+                // If backend returns a remainingPath (preferred) use it to skip nodes
+                // backend may return "remainingPath" or "path" (we handle both)
+                const remainingPath = data.remainingPath || data.path || null;
+
+                if (candidateCoords) {
+                    const dist = getDistance(userCoords.lat, userCoords.lng, candidateCoords.lat, candidateCoords.lng);
+
+                    // If candidate is too close, attempt to advance in remainingPath (skip)
+                    if (dist < SKIP_THRESHOLD && Array.isArray(remainingPath) && remainingPath.length > 1) {
+                        // try to pick the next meaningful node (index 1)
+                        const nextName = remainingPath.length > 1 ? remainingPath[1] : remainingPath[0];
+                        if (nextName) {
+                            const nodesRes = await fetch(`${BASE_URL.replace("/api", "")}/api/nodes`);
+                            if (nodesRes.ok) {
+                                const nodes = await nodesRes.json();
+                                if (nodes[nextName]) {
+                                    setTargetCoords({ lat: nodes[nextName][0], lng: nodes[nextName][1] });
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    // Otherwise set the returned candidate
+                    setTargetCoords(candidateCoords);
+                } else {
+                    // no coordinates returned — keep existing target but mark tracking not great
+                    console.warn("No candidate coords from /update-node");
+                }
+
             } catch (err) {
                 console.error("Error fetching target node:", err);
+                setTrackingHealthy(false);
             }
         };
         interval = setInterval(fetchTarget, 5000);
@@ -116,13 +162,16 @@ function ARView({ arrowStyle, path }) {
     };
 
     // ---------------------------
-    // AR LOGIC (stabilized)
+    // AR LOGIC (stabilized + enhancements)
     // ---------------------------
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture;
         let movementHeading = null;
         let lastUserCoords = null;
         let deviceHeading = 0;
+        let lastBearing = null;
+        let lastVibrationTurnAt = 0;
+        let arrived = false;
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -154,7 +203,10 @@ function ARView({ arrowStyle, path }) {
                 videoTexture.colorSpace = THREE.SRGBColorSpace;
                 scene.background = videoTexture;
             })
-            .catch((err) => console.error("Error accessing camera: ", err));
+            .catch((err) => {
+                console.error("Error accessing camera: ", err);
+                setTrackingHealthy(false);
+            });
 
         // 🔺 Arrow setup
         const arrowGroup = new THREE.Group();
@@ -178,6 +230,11 @@ function ARView({ arrowStyle, path }) {
 
         camera.add(arrowGroup);
         scene.add(camera);
+
+        // Distance label (we will render as HTML overlay; this keeps things simple & stable)
+        const updateDistanceLabel = (d) => {
+            setDistanceToTarget(Math.round(d));
+        };
 
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(0, 10, 10);
@@ -235,15 +292,43 @@ function ARView({ arrowStyle, path }) {
         if (typeof DeviceOrientationEvent.requestPermission === "function") {
             DeviceOrientationEvent.requestPermission().then((res) => {
                 if (res === "granted") window.addEventListener("deviceorientation", handleOrientation, true);
+            }).catch(()=> {
+                window.addEventListener("deviceorientation", handleOrientation, true);
             });
         } else {
             window.addEventListener("deviceorientation", handleOrientation, true);
         }
 
-        // Main animation
+        // Helper: small safe vibrator wrapper
+        const doVibrate = (pattern) => {
+            if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+                try {
+                    navigator.vibrate(pattern);
+                } catch (e) {
+                    // ignore
+                }
+            }
+        };
+
+        // Main animation loop (use requestAnimationFrame for smoothness)
+        let rafId;
         const animate = () => {
-            setTimeout(() => requestAnimationFrame(animate), 33); // ~30fps
-            if (!video.readyState >= video.HAVE_CURRENT_DATA) return;
+            rafId = requestAnimationFrame(animate);
+
+            // basic tracking health: video + user coords
+            const videoOk = video && video.readyState >= video.HAVE_CURRENT_DATA;
+            if (!videoOk || !userCoords) {
+                setTrackingHealthy(false);
+            } else {
+                setTrackingHealthy(true);
+            }
+
+            if (!videoOk) {
+                // render a blank or minimal scene if camera not ready
+                renderer.clear();
+                return;
+            }
+
             if (userCoords && targetCoords && arrowGroupRef.current) {
                 // Compute movement heading
                 if (lastUserCoords) {
@@ -279,37 +364,154 @@ function ARView({ arrowStyle, path }) {
                     targetCoords.lng
                 );
 
-                // Snap near node
-                const smoothFactor = dist < 8 ? 0.1 : 0.3;
+                // update distance label state (rounded meters)
+                updateDistanceLabel(dist);
+
+                // If lastBearing exists, check for a significant change in intended direction
+                if (lastBearing !== null) {
+                    const bearingDiff = Math.abs(bearing - lastBearing);
+                    // normalize > PI
+                    const normDiff = bearingDiff > Math.PI ? 2 * Math.PI - bearingDiff : bearingDiff;
+
+                    // If approaching a turn (distance within TURN_ALERT_DIST) and big change, vibrate
+                    const now = Date.now();
+                    if (normDiff > SIGNIFICANT_BEARING_CHANGE && dist < TURN_ALERT_DIST && (now - lastVibrationTurnAt) > 5000) {
+                        // short vibration to alert upcoming turn
+                        doVibrate([70]);
+                        lastVibrationTurnAt = now;
+                    }
+                }
+
+                // Snap near node: smoother near target
+                const smoothFactor = dist < 8 ? 0.08 : 0.28;
                 arrowGroupRef.current.rotation.y = THREE.MathUtils.lerp(
                     arrowGroupRef.current.rotation.y,
                     bearing - blendedHeading,
                     smoothFactor
                 );
 
-                // Stop camera when very close
-                if (dist < 10 && !cameraStopped && video.srcObject) {
-                    video.srcObject.getTracks().forEach((t) => t.stop());
-                    video.srcObject = null;
+                // Arrival handling
+                if (dist < ARRIVAL_THRESHOLD && !arrived) {
+                    arrived = true;
+                    // stop camera
+                    if (video.srcObject) {
+                        video.srcObject.getTracks().forEach((t) => t.stop());
+                        video.srcObject = null;
+                    }
                     setCameraStopped(true);
+                    doVibrate([180]); // arrival haptic
                     console.log("📷 Camera stopped: Destination reached!");
                 }
+
+                lastBearing = bearing;
             }
+
             if (videoTexture) videoTexture.needsUpdate = true;
             renderer.render(scene, camera);
         };
         animate();
 
         return () => {
+            cancelAnimationFrame(rafId);
             if (mountRef.current && renderer) mountRef.current.removeChild(renderer.domElement);
-            if (video && video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
+            if (video && video.srcObject) try { video.srcObject.getTracks().forEach((t) => t.stop()); } catch (e) {}
             window.removeEventListener("deviceorientation", handleOrientation);
         };
     }, [arrowStyle, userCoords, targetCoords, cameraStopped]);
 
+    // Simple compass fallback UI (top-right compact)
+    const CompassFallback = ({ headingDeg, distance }) => {
+        // headingDeg: degrees where 0 = north
+        const size = 72;
+        return (
+            <div style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                background: "rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                zIndex: 50,
+                border: "1px solid rgba(255,255,255,0.12)"
+            }}>
+                <div style={{ textAlign: "center", fontSize: 11 }}>
+                    <div style={{ transform: `rotate(${headingDeg}deg)`, transition: "transform 200ms linear" }}>
+                        {/* simple needle using CSS */}
+                        <svg width="36" height="36" viewBox="0 0 36 36" style={{ display: "block" }}>
+                            <g transform="translate(18,18)">
+                                <polygon points="0,-12 4,4 0,2 -4,4" fill="#ff4757" />
+                                <circle r="2" fill="#ffffff" />
+                            </g>
+                        </svg>
+                    </div>
+                    <div style={{ fontSize: 11, marginTop: 2 }}>{distance ? `${distance} m` : "..."}</div>
+                </div>
+            </div>
+        );
+    };
+
+    // compute heading degrees from deviceorientation if available (best-effort)
+    const [headingDegState, setHeadingDegState] = useState(0);
+    useEffect(() => {
+        const updateHeadingDeg = (e) => {
+            let deg = 0;
+            if (typeof e.webkitCompassHeading !== "undefined") {
+                deg = e.webkitCompassHeading;
+            } else {
+                // fallback to alpha
+                deg = e.alpha || 0;
+            }
+            // alpha is 0..360. Convert to deg for display (invert so needle points correctly)
+            setHeadingDegState(-deg);
+        };
+
+        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+            DeviceOrientationEvent.requestPermission().then((res) => {
+                if (res === "granted") window.addEventListener("deviceorientation", updateHeadingDeg, true);
+            }).catch(() => {
+                window.addEventListener("deviceorientation", updateHeadingDeg, true);
+            });
+        } else {
+            window.addEventListener("deviceorientation", updateHeadingDeg, true);
+        }
+
+        return () => window.removeEventListener("deviceorientation", updateHeadingDeg);
+    }, []);
+
     return (
         <>
             <div ref={mountRef} style={{ width: "100vw", height: "100vh" }} />
+
+            {/* Distance label centered above bottom-ish (keeps UI uncluttered) */}
+            <div style={{
+                position: "absolute",
+                bottom: 140,
+                left: "50%",
+                transform: "translateX(-50%)",
+                background: "rgba(0,0,0,0.45)",
+                padding: "6px 10px",
+                borderRadius: 12,
+                color: "#fff",
+                fontWeight: "600",
+                zIndex: 40,
+                minWidth: 56,
+                textAlign: "center",
+                fontFamily: "Poppins, sans-serif",
+                pointerEvents: "none"
+            }}>
+                {distanceToTarget !== null ? `${distanceToTarget} m` : "— m"}
+            </div>
+
+            {/* Fallback compass displayed when tracking unhealthy */}
+            {!trackingHealthy && (
+                <CompassFallback headingDeg={headingDegState} distance={distanceToTarget} />
+            )}
+
             {cameraStopped && (
                 <div
                     style={{
@@ -322,11 +524,13 @@ function ARView({ arrowStyle, path }) {
                         padding: "12px 20px",
                         borderRadius: "8px",
                         fontWeight: "bold",
+                        zIndex: 40
                     }}
                 >
                     🎯 You’ve reached the SIT Front Gate
                 </div>
             )}
+
             {/* Chat UI */}
             <div
                 style={{
@@ -343,6 +547,7 @@ function ARView({ arrowStyle, path }) {
                     maxWidth: 420,
                     color: "#fff",
                     boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+                    zIndex: 30
                 }}
             >
                 <div
@@ -376,6 +581,7 @@ function ARView({ arrowStyle, path }) {
                             color: "#fff",
                             outline: "none",
                         }}
+                        onKeyDown={(e) => { if (e.key === "Enter") sendMessage(); }}
                     />
                     <button
                         onClick={sendMessage}
@@ -390,8 +596,8 @@ function ARView({ arrowStyle, path }) {
                             boxShadow: "0 3px 8px rgba(0,0,0,0.3)",
                             transition: "0.3s",
                         }}
-                        onMouseOver={(e) => (e.target.style.opacity = 0.9)}
-                        onMouseOut={(e) => (e.target.style.opacity = 1)}
+                        onMouseOver={(e) => (e.currentTarget.style.opacity = 0.9)}
+                        onMouseOut={(e) => (e.currentTarget.style.opacity = 1)}
                     >
                         Send
                     </button>
