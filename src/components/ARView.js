@@ -194,25 +194,53 @@ function ARView({ arrowStyle, path }) {
         );
 
         let deviceHeading = 0;
+
+        // Smoothed heading variables
+        let smoothedHeading = 0;
+        const smoothingFactor = 0.15; // lower = smoother but slower updates
+
         const handleOrientation = (event) => {
             let heading;
+
             if (typeof event.webkitCompassHeading !== "undefined") {
+                // ✅ iPhone absolute heading
                 heading = THREE.MathUtils.degToRad(event.webkitCompassHeading);
             } else {
+                // ✅ Android fallback (orientation matrix)
                 const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
                 const beta = THREE.MathUtils.degToRad(event.beta || 0);
                 const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
+
                 const cA = Math.cos(alpha), sA = Math.sin(alpha);
                 const cB = Math.cos(beta), sB = Math.sin(beta);
                 const cG = Math.cos(gamma), sG = Math.sin(gamma);
+
+                // Calculate approximate yaw (device facing direction)
                 const Vx = -cA * sG - sA * sB * cG;
                 const Vy = -sA * sG + cA * sB * cG;
                 heading = Math.atan(Vx / Vy);
                 if (Vy < 0) heading += Math.PI;
                 else if (Vx < 0) heading += 2 * Math.PI;
+
+                // ✅ Apply tilt correction if device not upright
+                const tilt = Math.abs(beta);
+                if (tilt > Math.PI / 4) {
+                    // if tilted > 45°, reduce heading sensitivity
+                    heading = smoothedHeading; // lock heading
+                }
             }
-            deviceHeading = heading;
+
+            // ✅ Apply exponential smoothing (low-pass filter)
+            if (Math.abs(heading - smoothedHeading) > Math.PI) {
+                // handle 0/360° wrap-around
+                if (heading > smoothedHeading) heading -= 2 * Math.PI;
+                else heading += 2 * Math.PI;
+            }
+
+            smoothedHeading += (heading - smoothedHeading) * smoothingFactor;
+            deviceHeading = smoothedHeading;
         };
+
 
         if (typeof DeviceOrientationEvent.requestPermission === "function") {
             DeviceOrientationEvent.requestPermission().then((res) => {
