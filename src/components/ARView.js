@@ -10,7 +10,12 @@ function ARView({ arrowStyle, path }) {
     const [targetCoords, setTargetCoords] = useState({ lat: 13.331748, lng: 77.127378 });
     const [chatInput, setChatInput] = useState("");
     const [chatHistory, setChatHistory] = useState([]);
-    const [cameraStopped, setCameraStopped] = useState(false); // ✅ new
+    const [cameraStopped, setCameraStopped] = useState(false);
+
+    // ✅ smoothing + minimum distance filter
+    const SMOOTHING_FACTOR = 0.2;
+    const MIN_NODE_DISTANCE = 6; // meters, ignore jitter if too small
+    const smoothTargetRef = useRef({ lat: 13.331748, lng: 77.127378 });
 
     // helper to calculate distance
     const getDistance = (lat1, lon1, lat2, lon2) => {
@@ -39,15 +44,38 @@ function ARView({ arrowStyle, path }) {
                     body: JSON.stringify({ latitude: userCoords.lat, longitude: userCoords.lng }),
                 });
                 const data = await res.json();
+
+                let newTarget = null;
                 if (data.nextCoordinates && Array.isArray(data.nextCoordinates)) {
-                    setTargetCoords({ lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] });
+                    newTarget = { lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] };
                 } else if (data.nextNode && typeof data.nextNode === "string") {
-                    const nodesRes = await fetch(`${BASE_URL.replace('/api','')}/api/nodes`);
+                    const nodesRes = await fetch(`${BASE_URL.replace("/api", "")}/api/nodes`);
                     if (nodesRes.ok) {
                         const nodes = await nodesRes.json();
                         if (nodes[data.nextNode]) {
-                            setTargetCoords({ lat: nodes[data.nextNode][0], lng: nodes[data.nextNode][1] });
+                            newTarget = { lat: nodes[data.nextNode][0], lng: nodes[data.nextNode][1] };
                         }
+                    }
+                }
+
+                // ✅ only update if new target is significantly far from current one
+                if (newTarget) {
+                    const diff = getDistance(
+                        targetCoords.lat,
+                        targetCoords.lng,
+                        newTarget.lat,
+                        newTarget.lng
+                    );
+                    if (diff > MIN_NODE_DISTANCE) {
+                        smoothTargetRef.current = {
+                            lat:
+                                smoothTargetRef.current.lat +
+                                SMOOTHING_FACTOR * (newTarget.lat - smoothTargetRef.current.lat),
+                            lng:
+                                smoothTargetRef.current.lng +
+                                SMOOTHING_FACTOR * (newTarget.lng - smoothTargetRef.current.lng),
+                        };
+                        setTargetCoords(smoothTargetRef.current);
                     }
                 }
             } catch (err) {
@@ -105,11 +133,10 @@ function ARView({ arrowStyle, path }) {
         video.style.display = "none";
         videoRef.current = video;
 
-        // ✅ prevent multiple restarts
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" }, audio: false })
             .then((stream) => {
-                if (cameraStopped) return; // ✅ don’t restart if already stopped
+                if (cameraStopped) return;
                 video.srcObject = stream;
                 video.play();
                 videoTexture = new THREE.VideoTexture(video);
@@ -207,7 +234,6 @@ function ARView({ arrowStyle, path }) {
                     );
                     arrowGroupRef.current.rotation.y = bearing - deviceHeading;
 
-                    // ✅ Stop camera when destination is close (< 10m)
                     const dist = getDistance(userCoords.lat, userCoords.lng, targetCoords.lat, targetCoords.lng);
                     if (dist < 10 && !cameraStopped) {
                         if (video.srcObject) {
@@ -230,7 +256,7 @@ function ARView({ arrowStyle, path }) {
             navigator.geolocation.clearWatch(geoWatch);
             window.removeEventListener("deviceorientation", handleOrientation);
         };
-    }, [arrowStyle, userCoords, targetCoords, cameraStopped]); // ✅ added cameraStopped dependency
+    }, [arrowStyle, userCoords, targetCoords, cameraStopped]);
 
     return (
         <>
@@ -252,6 +278,7 @@ function ARView({ arrowStyle, path }) {
                     🎯 You’ve reached the SIT Front Gate
                 </div>
             )}
+
             {/* 🔹 Floating glass chat UI */}
             <div
                 style={{
