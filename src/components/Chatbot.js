@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { BASE_URL } from "../config";
 
 function Chatbot({ setShowAR, setPath }) {
     const [message, setMessage] = useState("");
@@ -32,7 +33,7 @@ function Chatbot({ setShowAR, setPath }) {
 
         try {
             const coords = await getLocation().catch(() => null); // if GPS fails, send nulls
-            const res = await fetch("https://navsit-backend-production.up.railway.app/api/chat", {
+            const res = await fetch(`${BASE_URL}/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -49,7 +50,7 @@ function Chatbot({ setShowAR, setPath }) {
             if (data.nextNode) {
                 setChatHistory((prev) => [
                     ...prev,
-                    { sender: "bot", text: `Navigating to ${data.nextNode.name}...` }
+                    { sender: "bot", text: `Navigating to ${data.nextNode}...` }
                 ]);
                 setPath([data.nextNode]);
                 setShowAR(true);
@@ -188,3 +189,4 @@ function Chatbot({ setShowAR, setPath }) {
 }
 
 export default Chatbot;
+

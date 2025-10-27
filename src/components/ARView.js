@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { BASE_URL } from "../config";
 
-function ARView({ arrowStyle, backendUrl }) {
+function ARView({ arrowStyle, path }) {
     const mountRef = useRef();
     const videoRef = useRef();
     const arrowGroupRef = useRef();
@@ -10,30 +11,57 @@ function ARView({ arrowStyle, backendUrl }) {
     const [chatInput, setChatInput] = useState("");
     const [chatHistory, setChatHistory] = useState([]);
 
-    // 🔹 Fetch dynamic target from backend
+    // 🔹 Fetch dynamic target from backend every 5s by POSTing current position
     useEffect(() => {
+        let interval;
         const fetchTarget = async () => {
             try {
-                const res = await fetch(`${backendUrl}/next-node`);
+                if (!userCoords) return; // wait until we have GPS
+                const res = await fetch(`${BASE_URL}/chat/update-node`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ latitude: userCoords.lat, longitude: userCoords.lng }),
+                });
                 const data = await res.json();
-                if (data.lat && data.lng) setTargetCoords({ lat: data.lat, lng: data.lng });
+                // backend returns nextCoordinates (array) or nextNode name
+                if (data.nextCoordinates && Array.isArray(data.nextCoordinates)) {
+                    setTargetCoords({ lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] });
+                } else if (data.nextNode && typeof data.nextNode === "string") {
+                    // If only name given, we might request coordinates from /api/nodes or rely on previous path
+                    // Try to fetch node coordinates
+                    const nodesRes = await fetch(`${BASE_URL.replace('/api','')}/api/nodes`);
+                    if (nodesRes.ok) {
+                        const nodes = await nodesRes.json();
+                        if (nodes[data.nextNode]) {
+                            setTargetCoords({ lat: nodes[data.nextNode][0], lng: nodes[data.nextNode][1] });
+                        }
+                    }
+                }
             } catch (err) {
                 console.error("Error fetching target node:", err);
             }
         };
-        fetchTarget();
-        const interval = setInterval(fetchTarget, 5000);
-        return () => clearInterval(interval);
-    }, [backendUrl]);
 
-    // 🔹 Send chat message
+        interval = setInterval(fetchTarget, 5000);
+        // also run immediately once (but only if we have coords)
+        fetchTarget();
+
+        return () => clearInterval(interval);
+    }, [userCoords]);
+
+    // 🔹 Send chat message (small chat UI inside ARView)
     const sendMessage = async () => {
         if (!chatInput.trim()) return;
         try {
-            const res = await fetch(`${backendUrl}/chat`, {
+            const payload = { message: chatInput };
+            if (userCoords) {
+                payload.latitude = userCoords.lat;
+                payload.longitude = userCoords.lng;
+            }
+            const res = await fetch(`${BASE_URL}/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: chatInput }),
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
             setChatHistory((prev) => [...prev, { user: chatInput, bot: data.reply || "..." }]);
@@ -183,7 +211,7 @@ function ARView({ arrowStyle, backendUrl }) {
             navigator.geolocation.clearWatch(geoWatch);
             window.removeEventListener("deviceorientation", handleOrientation);
         };
-    }, [arrowStyle, userCoords, targetCoords, backendUrl]);
+    }, [arrowStyle, userCoords, targetCoords]);
     // ---------------------------
 
     return (
@@ -265,3 +293,4 @@ function ARView({ arrowStyle, backendUrl }) {
 }
 
 export default ARView;
+
