@@ -12,27 +12,46 @@ function ARView({ arrowStyle, path }) {
     const [chatHistory, setChatHistory] = useState([]);
     const [cameraStopped, setCameraStopped] = useState(false);
 
-    // ✅ smoothing + minimum distance filter
-    const SMOOTHING_FACTOR = 0.2;
-    const MIN_NODE_DISTANCE = 6; // meters, ignore jitter if too small
-    const smoothTargetRef = useRef({ lat: 13.331748, lng: 77.127378 });
-
-    // helper to calculate distance
+    // 🔹 Utility: distance between two lat/lngs
     const getDistance = (lat1, lon1, lat2, lon2) => {
-        const R = 6371e3; // metres
+        const R = 6371e3;
         const φ1 = (lat1 * Math.PI) / 180;
         const φ2 = (lat2 * Math.PI) / 180;
         const Δφ = ((lat2 - lat1) * Math.PI) / 180;
         const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
         const a =
-            Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            Math.sin(Δφ / 2) ** 2 +
+            Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     };
 
-    // 🔹 Fetch dynamic target from backend every 5s
+    // 🔹 Smooth GPS updates (average last 5)
+    useEffect(() => {
+        let lastPositions = [];
+        const MAX_POINTS = 5;
+
+        const geoWatch = navigator.geolocation.watchPosition(
+            (pos) => {
+                const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                lastPositions.push(newPos);
+                if (lastPositions.length > MAX_POINTS) lastPositions.shift();
+
+                const avgLat =
+                    lastPositions.reduce((a, p) => a + p.lat, 0) / lastPositions.length;
+                const avgLng =
+                    lastPositions.reduce((a, p) => a + p.lng, 0) / lastPositions.length;
+
+                setUserCoords({ lat: avgLat, lng: avgLng });
+            },
+            (err) => console.error(err),
+            { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+        );
+
+        return () => navigator.geolocation.clearWatch(geoWatch);
+    }, []);
+
+    // 🔹 Fetch dynamic next node every 5 seconds
     useEffect(() => {
         let interval;
         const fetchTarget = async () => {
@@ -41,41 +60,28 @@ function ARView({ arrowStyle, path }) {
                 const res = await fetch(`${BASE_URL}/chat/update-node`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ latitude: userCoords.lat, longitude: userCoords.lng }),
+                    body: JSON.stringify({
+                        latitude: userCoords.lat,
+                        longitude: userCoords.lng,
+                    }),
                 });
                 const data = await res.json();
 
-                let newTarget = null;
                 if (data.nextCoordinates && Array.isArray(data.nextCoordinates)) {
-                    newTarget = { lat: data.nextCoordinates[0], lng: data.nextCoordinates[1] };
+                    setTargetCoords({
+                        lat: data.nextCoordinates[0],
+                        lng: data.nextCoordinates[1],
+                    });
                 } else if (data.nextNode && typeof data.nextNode === "string") {
                     const nodesRes = await fetch(`${BASE_URL.replace("/api", "")}/api/nodes`);
                     if (nodesRes.ok) {
                         const nodes = await nodesRes.json();
                         if (nodes[data.nextNode]) {
-                            newTarget = { lat: nodes[data.nextNode][0], lng: nodes[data.nextNode][1] };
+                            setTargetCoords({
+                                lat: nodes[data.nextNode][0],
+                                lng: nodes[data.nextNode][1],
+                            });
                         }
-                    }
-                }
-
-                // ✅ only update if new target is significantly far from current one
-                if (newTarget) {
-                    const diff = getDistance(
-                        targetCoords.lat,
-                        targetCoords.lng,
-                        newTarget.lat,
-                        newTarget.lng
-                    );
-                    if (diff > MIN_NODE_DISTANCE) {
-                        smoothTargetRef.current = {
-                            lat:
-                                smoothTargetRef.current.lat +
-                                SMOOTHING_FACTOR * (newTarget.lat - smoothTargetRef.current.lat),
-                            lng:
-                                smoothTargetRef.current.lng +
-                                SMOOTHING_FACTOR * (newTarget.lng - smoothTargetRef.current.lng),
-                        };
-                        setTargetCoords(smoothTargetRef.current);
                     }
                 }
             } catch (err) {
@@ -110,23 +116,25 @@ function ARView({ arrowStyle, path }) {
     };
 
     // ---------------------------
-    // ORIGINAL AR LOGIC (untouched)
+    // AR LOGIC (stabilized)
     // ---------------------------
     useEffect(() => {
         let renderer, scene, camera, video, videoTexture;
+        let movementHeading = null;
+        let lastUserCoords = null;
+        let deviceHeading = 0;
+
         const width = window.innerWidth;
         const height = window.innerHeight;
-
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-        camera.position.set(0, 1.6, 0);
-
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
-        if (mountRef.current) mountRef.current.appendChild(renderer.domElement);
+        mountRef.current?.appendChild(renderer.domElement);
 
+        // 📷 Camera setup
         video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
@@ -148,6 +156,7 @@ function ARView({ arrowStyle, path }) {
             })
             .catch((err) => console.error("Error accessing camera: ", err));
 
+        // 🔺 Arrow setup
         const arrowGroup = new THREE.Group();
         arrowGroup.position.set(0, -0.5, -1);
         arrowGroupRef.current = arrowGroup;
@@ -175,6 +184,7 @@ function ARView({ arrowStyle, path }) {
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
+        // Bearing computation
         const computeBearing = (lat1, lng1, lat2, lng2) => {
             const φ1 = THREE.MathUtils.degToRad(lat1);
             const φ2 = THREE.MathUtils.degToRad(lat2);
@@ -187,60 +197,40 @@ function ARView({ arrowStyle, path }) {
             return θ;
         };
 
-        const geoWatch = navigator.geolocation.watchPosition(
-            (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            (err) => console.error(err),
-            { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
-        );
-
-        let deviceHeading = 0;
-
-        // Smoothed heading variables
-        let smoothedHeading = 0;
-        const smoothingFactor = 0.15; // lower = smoother but slower updates
+        // Movement-based heading fusion
+        const computeMovementHeading = (oldPos, newPos) => {
+            const φ1 = THREE.MathUtils.degToRad(oldPos.lat);
+            const φ2 = THREE.MathUtils.degToRad(newPos.lat);
+            const Δλ = THREE.MathUtils.degToRad(newPos.lng - oldPos.lng);
+            const y = Math.sin(Δλ) * Math.cos(φ2);
+            const x =
+                Math.cos(φ1) * Math.sin(φ2) -
+                Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+            return Math.atan2(y, x);
+        };
 
         const handleOrientation = (event) => {
             let heading;
-
             if (typeof event.webkitCompassHeading !== "undefined") {
-                // ✅ iPhone absolute heading
                 heading = THREE.MathUtils.degToRad(event.webkitCompassHeading);
             } else {
-                // ✅ Android fallback (orientation matrix)
                 const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
                 const beta = THREE.MathUtils.degToRad(event.beta || 0);
                 const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
-
-                const cA = Math.cos(alpha), sA = Math.sin(alpha);
-                const cB = Math.cos(beta), sB = Math.sin(beta);
-                const cG = Math.cos(gamma), sG = Math.sin(gamma);
-
-                // Calculate approximate yaw (device facing direction)
+                const cA = Math.cos(alpha),
+                    sA = Math.sin(alpha);
+                const cB = Math.cos(beta),
+                    sB = Math.sin(beta);
+                const cG = Math.cos(gamma),
+                    sG = Math.sin(gamma);
                 const Vx = -cA * sG - sA * sB * cG;
                 const Vy = -sA * sG + cA * sB * cG;
                 heading = Math.atan(Vx / Vy);
                 if (Vy < 0) heading += Math.PI;
                 else if (Vx < 0) heading += 2 * Math.PI;
-
-                // ✅ Apply tilt correction if device not upright
-                const tilt = Math.abs(beta);
-                if (tilt > Math.PI / 4) {
-                    // if tilted > 45°, reduce heading sensitivity
-                    heading = smoothedHeading; // lock heading
-                }
             }
-
-            // ✅ Apply exponential smoothing (low-pass filter)
-            if (Math.abs(heading - smoothedHeading) > Math.PI) {
-                // handle 0/360° wrap-around
-                if (heading > smoothedHeading) heading -= 2 * Math.PI;
-                else heading += 2 * Math.PI;
-            }
-
-            smoothedHeading += (heading - smoothedHeading) * smoothingFactor;
-            deviceHeading = smoothedHeading;
+            deviceHeading = heading;
         };
-
 
         if (typeof DeviceOrientationEvent.requestPermission === "function") {
             DeviceOrientationEvent.requestPermission().then((res) => {
@@ -250,38 +240,69 @@ function ARView({ arrowStyle, path }) {
             window.addEventListener("deviceorientation", handleOrientation, true);
         }
 
+        // Main animation
         const animate = () => {
-            requestAnimationFrame(animate);
-            if (video.readyState >= video.HAVE_CURRENT_DATA) {
-                if (userCoords && arrowGroupRef.current && targetCoords) {
-                    const bearing = computeBearing(
+            setTimeout(() => requestAnimationFrame(animate), 33); // ~30fps
+            if (!video.readyState >= video.HAVE_CURRENT_DATA) return;
+            if (userCoords && targetCoords && arrowGroupRef.current) {
+                // Compute movement heading
+                if (lastUserCoords) {
+                    const distMoved = getDistance(
+                        lastUserCoords.lat,
+                        lastUserCoords.lng,
                         userCoords.lat,
-                        userCoords.lng,
-                        targetCoords.lat,
-                        targetCoords.lng
+                        userCoords.lng
                     );
-                    arrowGroupRef.current.rotation.y = bearing - deviceHeading;
-
-                    const dist = getDistance(userCoords.lat, userCoords.lng, targetCoords.lat, targetCoords.lng);
-                    if (dist < 10 && !cameraStopped) {
-                        if (video.srcObject) {
-                            video.srcObject.getTracks().forEach((t) => t.stop());
-                            video.srcObject = null;
-                            setCameraStopped(true);
-                            console.log("📷 Camera stopped: Destination reached!");
-                        }
+                    if (distMoved > 1) {
+                        movementHeading = computeMovementHeading(lastUserCoords, userCoords);
+                        lastUserCoords = userCoords;
                     }
+                } else {
+                    lastUserCoords = userCoords;
                 }
-                if (videoTexture) videoTexture.needsUpdate = true;
-                renderer.render(scene, camera);
+
+                const bearing = computeBearing(
+                    userCoords.lat,
+                    userCoords.lng,
+                    targetCoords.lat,
+                    targetCoords.lng
+                );
+
+                const blendedHeading = movementHeading
+                    ? deviceHeading * 0.7 + movementHeading * 0.3
+                    : deviceHeading;
+
+                const dist = getDistance(
+                    userCoords.lat,
+                    userCoords.lng,
+                    targetCoords.lat,
+                    targetCoords.lng
+                );
+
+                // Snap near node
+                const smoothFactor = dist < 8 ? 0.1 : 0.3;
+                arrowGroupRef.current.rotation.y = THREE.MathUtils.lerp(
+                    arrowGroupRef.current.rotation.y,
+                    bearing - blendedHeading,
+                    smoothFactor
+                );
+
+                // Stop camera when very close
+                if (dist < 10 && !cameraStopped && video.srcObject) {
+                    video.srcObject.getTracks().forEach((t) => t.stop());
+                    video.srcObject = null;
+                    setCameraStopped(true);
+                    console.log("📷 Camera stopped: Destination reached!");
+                }
             }
+            if (videoTexture) videoTexture.needsUpdate = true;
+            renderer.render(scene, camera);
         };
         animate();
 
         return () => {
             if (mountRef.current && renderer) mountRef.current.removeChild(renderer.domElement);
             if (video && video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
-            navigator.geolocation.clearWatch(geoWatch);
             window.removeEventListener("deviceorientation", handleOrientation);
         };
     }, [arrowStyle, userCoords, targetCoords, cameraStopped]);
@@ -306,8 +327,7 @@ function ARView({ arrowStyle, path }) {
                     🎯 You’ve reached the SIT Front Gate
                 </div>
             )}
-
-            {/* 🔹 Floating glass chat UI */}
+            {/* Chat UI */}
             <div
                 style={{
                     position: "absolute",
