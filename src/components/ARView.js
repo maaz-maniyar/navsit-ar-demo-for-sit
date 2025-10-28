@@ -12,6 +12,7 @@ export default function ARView({ nextNodeCoords, onBack }) {
         let animationId;
 
         // Initialize Three.js Scene
+        //...
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
