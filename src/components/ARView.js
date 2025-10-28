@@ -7,13 +7,14 @@ const ARView = ({ path }) => {
     const [nextNode, setNextNode] = useState(null);
     const [nodeCoords, setNodeCoords] = useState(null);
     const [userCoords, setUserCoords] = useState(null);
+    const [sessionStarted, setSessionStarted] = useState(false);
     const containerRef = useRef(null);
     const arrowRef = useRef(null);
-    const sceneRef = useRef(null);
-    const cameraRef = useRef(null);
     const rendererRef = useRef(null);
+    const cameraRef = useRef(null);
+    const sceneRef = useRef(null);
 
-    // === 1️⃣ Get live GPS ===
+    // 1️⃣ Watch GPS
     useEffect(() => {
         const watchId = navigator.geolocation.watchPosition(
             (pos) => {
@@ -28,7 +29,7 @@ const ARView = ({ path }) => {
         return () => navigator.geolocation.clearWatch(watchId);
     }, []);
 
-    // === 2️⃣ Fetch node coordinates from backend path ===
+    // 2️⃣ Get path data
     useEffect(() => {
         if (!path || !path.length) return;
         const fetchNodeData = async () => {
@@ -51,27 +52,30 @@ const ARView = ({ path }) => {
         fetchNodeData();
     }, [path]);
 
-    // === 3️⃣ Setup WebXR AR Scene ===
-    useEffect(() => {
-        if (!containerRef.current) return;
+    // 3️⃣ Initialize AR Scene after user click
+    const startARSession = async () => {
+        if (!navigator.xr) {
+            alert("WebXR not supported on this device or browser.");
+            return;
+        }
 
         const scene = new THREE.Scene();
-        sceneRef.current = scene;
-
         const camera = new THREE.PerspectiveCamera();
-        cameraRef.current = camera;
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
-        containerRef.current.appendChild(renderer.domElement);
+
+        sceneRef.current = scene;
+        cameraRef.current = camera;
         rendererRef.current = renderer;
 
-        // Light
+        containerRef.current.innerHTML = "";
+        containerRef.current.appendChild(renderer.domElement);
+
         const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
         scene.add(light);
 
-        // Arrow (simple cone)
+        // Arrow model
         const arrowGeometry = new THREE.ConeGeometry(0.1, 0.3, 32);
         const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
         const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
@@ -79,28 +83,27 @@ const ARView = ({ path }) => {
         scene.add(arrow);
         arrowRef.current = arrow;
 
-        // Start WebXR AR Session
-        navigator.xr
-            ?.requestSession("immersive-ar", { requiredFeatures: ["local-floor", "camera-access"] })
-            .then((session) => {
-                renderer.xr.setSession(session);
-                const animate = () => {
-                    renderer.setAnimationLoop(() => {
-                        renderer.render(scene, camera);
-                    });
-                };
-                animate();
-            })
-            .catch((err) => console.error("WebXR init failed:", err));
+        try {
+            const session = await navigator.xr.requestSession("immersive-ar", {
+                requiredFeatures: ["local", "hit-test"],
+            });
 
-        return () => {
-            renderer.setAnimationLoop(null);
-            renderer.dispose();
-            containerRef.current.removeChild(renderer.domElement);
-        };
-    }, []);
+            renderer.xr.setSession(session);
+            setSessionStarted(true);
 
-    // === 4️⃣ Update Arrow Rotation towards next node ===
+            const animate = () => {
+                renderer.setAnimationLoop(() => {
+                    renderer.render(scene, camera);
+                });
+            };
+            animate();
+        } catch (e) {
+            console.error("Failed to start AR:", e);
+            alert("Failed to start AR session. Make sure camera permissions are granted.");
+        }
+    };
+
+    // 4️⃣ Arrow rotation
     useEffect(() => {
         if (!nodeCoords || !userCoords || !arrowRef.current) return;
 
@@ -132,7 +135,7 @@ const ARView = ({ path }) => {
         return () => window.removeEventListener("deviceorientationabsolute", handleOrientation);
     }, [nodeCoords, userCoords]);
 
-    // === 5️⃣ Poll backend every 5s to check next node ===
+    // 5️⃣ Poll backend for updates
     useEffect(() => {
         const interval = setInterval(async () => {
             if (!userCoords) return;
@@ -168,8 +171,39 @@ const ARView = ({ path }) => {
                 width: "100vw",
                 overflow: "hidden",
                 backgroundColor: "black",
+                position: "relative",
             }}
-        />
+        >
+            {!sessionStarted && (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: "45%",
+                        left: "50%",
+                        transform: "translate(-50%, -50%)",
+                        color: "white",
+                        textAlign: "center",
+                    }}
+                >
+                    <h3>AR Mode Ready</h3>
+                    <p>Tap below to start camera view</p>
+                    <button
+                        onClick={startARSession}
+                        style={{
+                            background: "#4CAF50",
+                            border: "none",
+                            color: "white",
+                            padding: "12px 24px",
+                            borderRadius: "8px",
+                            fontSize: "16px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        Start AR
+                    </button>
+                </div>
+            )}
+        </div>
     );
 };
 
