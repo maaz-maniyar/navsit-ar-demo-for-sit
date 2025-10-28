@@ -1,210 +1,156 @@
-// src/components/ARView.js
 import React, { useEffect, useRef, useState } from "react";
-import { BASE_URL } from "../config";
 import * as THREE from "three";
 
-const ARView = ({ path }) => {
-    const [nextNode, setNextNode] = useState(null);
-    const [nodeCoords, setNodeCoords] = useState(null);
-    const [userCoords, setUserCoords] = useState(null);
-    const [sessionStarted, setSessionStarted] = useState(false);
+export default function ARView({ nextNodeCoords, onBack }) {
     const containerRef = useRef(null);
-    const arrowRef = useRef(null);
-    const rendererRef = useRef(null);
-    const cameraRef = useRef(null);
-    const sceneRef = useRef(null);
+    const [heading, setHeading] = useState(0);
+    const [userLocation, setUserLocation] = useState(null);
+    const [cameraStream, setCameraStream] = useState(null);
 
-    // 1️⃣ Watch GPS
     useEffect(() => {
-        const watchId = navigator.geolocation.watchPosition(
+        let scene, camera, renderer, arrow;
+        let animationId;
+
+        // Initialize Three.js Scene
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        containerRef.current.appendChild(renderer.domElement);
+
+        // Ground plane (for reference)
+        const planeGeometry = new THREE.PlaneGeometry(100, 100);
+        const planeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0 });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        scene.add(plane);
+
+        // Arrow (direction indicator)
+        const arrowGeometry = new THREE.ConeGeometry(0.5, 2, 32);
+        const arrowMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        arrow.position.y = 1; // Raise slightly above ground
+        scene.add(arrow);
+
+        camera.position.y = 1.6; // Eye level height
+
+        // Animate loop
+        const animate = () => {
+            animationId = requestAnimationFrame(animate);
+
+            if (userLocation && nextNodeCoords && heading !== null) {
+                const bearing = computeBearing(userLocation, nextNodeCoords);
+                const angle = THREE.MathUtils.degToRad(bearing - heading);
+                arrow.rotation.y = angle;
+            }
+
+            renderer.render(scene, camera);
+        };
+        animate();
+
+        return () => {
+            cancelAnimationFrame(animationId);
+            if (renderer) renderer.dispose();
+            if (containerRef.current && renderer.domElement) {
+                containerRef.current.removeChild(renderer.domElement);
+            }
+        };
+    }, [userLocation, heading, nextNodeCoords]);
+
+    // Get user GPS
+    useEffect(() => {
+        const geoWatch = navigator.geolocation.watchPosition(
             (pos) => {
-                setUserCoords({
+                setUserLocation({
                     lat: pos.coords.latitude,
                     lon: pos.coords.longitude,
                 });
             },
-            (err) => console.error("GPS Error:", err),
+            (err) => console.error("GPS error:", err),
             { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
         );
-        return () => navigator.geolocation.clearWatch(watchId);
+        return () => navigator.geolocation.clearWatch(geoWatch);
     }, []);
 
-    // 2️⃣ Get path data
+    // Get compass heading
     useEffect(() => {
-        if (!path || !path.length) return;
-        const fetchNodeData = async () => {
-            try {
-                const res = await fetch(`${BASE_URL}/chat`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: "continue" }),
-                });
-                const data = await res.json();
-                if (data.coordinates && data.path && data.path.length > 1) {
-                    const coords = data.coordinates[data.path[1]];
-                    setNextNode(data.path[1]);
-                    setNodeCoords({ lat: coords[0], lon: coords[1] });
-                }
-            } catch (err) {
-                console.error("Error fetching node data:", err);
+        const handleOrientation = (event) => {
+            if (event.absolute && event.alpha !== null) {
+                let compassHeading = 360 - event.alpha; // Convert from device rotation
+                setHeading(compassHeading);
             }
         };
-        fetchNodeData();
-    }, [path]);
-
-    // 3️⃣ Initialize AR Scene after user click
-    const startARSession = async () => {
-        if (!navigator.xr) {
-            alert("WebXR not supported on this device or browser.");
-            return;
-        }
-
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera();
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-
-        sceneRef.current = scene;
-        cameraRef.current = camera;
-        rendererRef.current = renderer;
-
-        containerRef.current.innerHTML = "";
-        containerRef.current.appendChild(renderer.domElement);
-
-        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-        scene.add(light);
-
-        // Arrow model
-        const arrowGeometry = new THREE.ConeGeometry(0.1, 0.3, 32);
-        const arrowMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        arrow.rotation.x = Math.PI; // point forward
-        scene.add(arrow);
-        arrowRef.current = arrow;
-
-        try {
-            const session = await navigator.xr.requestSession("immersive-ar", {
-                requiredFeatures: ["local", "hit-test"],
-            });
-
-            renderer.xr.setSession(session);
-            setSessionStarted(true);
-
-            const animate = () => {
-                renderer.setAnimationLoop(() => {
-                    renderer.render(scene, camera);
-                });
-            };
-            animate();
-        } catch (e) {
-            console.error("Failed to start AR:", e);
-            alert("Failed to start AR session. Make sure camera permissions are granted.");
-        }
-    };
-
-    // 4️⃣ Arrow rotation
-    useEffect(() => {
-        if (!nodeCoords || !userCoords || !arrowRef.current) return;
-
-        const toRadians = (deg) => (deg * Math.PI) / 180;
-        const toDegrees = (rad) => (rad * 180) / Math.PI;
-
-        const lat1 = toRadians(userCoords.lat);
-        const lon1 = toRadians(userCoords.lon);
-        const lat2 = toRadians(nodeCoords.lat);
-        const lon2 = toRadians(nodeCoords.lon);
-
-        const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-        const x =
-            Math.cos(lat1) * Math.sin(lat2) -
-            Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
-        const bearing = (toDegrees(Math.atan2(y, x)) + 360) % 360;
-
-        const rotateArrow = (heading) => {
-            const relativeBearing = bearing - heading;
-            arrowRef.current.rotation.y = THREE.MathUtils.degToRad(relativeBearing);
-        };
-
-        const handleOrientation = (event) => {
-            const heading = event.webkitCompassHeading || 360 - event.alpha;
-            if (heading != null) rotateArrow(heading);
-        };
-
         window.addEventListener("deviceorientationabsolute", handleOrientation, true);
         return () => window.removeEventListener("deviceorientationabsolute", handleOrientation);
-    }, [nodeCoords, userCoords]);
+    }, []);
 
-    // 5️⃣ Poll backend for updates
+    // Start camera stream as background
     useEffect(() => {
-        const interval = setInterval(async () => {
-            if (!userCoords) return;
+        const startCamera = async () => {
             try {
-                const res = await fetch(`${BASE_URL}/chat/update-node`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        latitude: userCoords.lat,
-                        longitude: userCoords.lon,
-                    }),
-                });
-                const data = await res.json();
-                if (data.nextNode && data.coordinates) {
-                    setNextNode(data.nextNode);
-                    setNodeCoords({
-                        lat: data.coordinates[0],
-                        lon: data.coordinates[1],
-                    });
-                }
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                setCameraStream(stream);
+                const video = document.createElement("video");
+                video.srcObject = stream;
+                video.play();
+                video.style.position = "fixed";
+                video.style.top = 0;
+                video.style.left = 0;
+                video.style.width = "100vw";
+                video.style.height = "100vh";
+                video.style.objectFit = "cover";
+                video.style.zIndex = "-1";
+                video.setAttribute("playsinline", "");
+                document.body.appendChild(video);
             } catch (err) {
-                console.error("Update node error:", err);
+                console.error("Camera error:", err);
             }
-        }, 5000);
-        return () => clearInterval(interval);
-    }, [userCoords]);
+        };
+        startCamera();
+
+        return () => {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+            }
+            const videos = document.querySelectorAll("video");
+            videos.forEach((v) => v.remove());
+        };
+    }, []);
 
     return (
-        <div
-            ref={containerRef}
-            style={{
-                height: "100vh",
-                width: "100vw",
-                overflow: "hidden",
-                backgroundColor: "black",
-                position: "relative",
-            }}
-        >
-            {!sessionStarted && (
-                <div
-                    style={{
-                        position: "absolute",
-                        top: "45%",
-                        left: "50%",
-                        transform: "translate(-50%, -50%)",
-                        color: "white",
-                        textAlign: "center",
-                    }}
-                >
-                    <h3>AR Mode Ready</h3>
-                    <p>Tap below to start camera view</p>
-                    <button
-                        onClick={startARSession}
-                        style={{
-                            background: "#4CAF50",
-                            border: "none",
-                            color: "white",
-                            padding: "12px 24px",
-                            borderRadius: "8px",
-                            fontSize: "16px",
-                            cursor: "pointer",
-                        }}
-                    >
-                        Start AR
-                    </button>
-                </div>
-            )}
+        <div>
+            <button
+                onClick={onBack}
+                style={{
+                    position: "fixed",
+                    top: "10px",
+                    left: "10px",
+                    padding: "10px 15px",
+                    background: "#222",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    zIndex: 10,
+                }}
+            >
+                Back to Chat
+            </button>
+
+            <div ref={containerRef} style={{ width: "100vw", height: "100vh" }} />
         </div>
     );
-};
+}
 
-export default ARView;
+// Utility: bearing between two GPS coordinates
+function computeBearing(start, end) {
+    const lat1 = THREE.MathUtils.degToRad(start.lat);
+    const lon1 = THREE.MathUtils.degToRad(start.lon);
+    const lat2 = THREE.MathUtils.degToRad(end[0]);
+    const lon2 = THREE.MathUtils.degToRad(end[1]);
+    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+    const x =
+        Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+    const brng = (THREE.MathUtils.radToDeg(Math.atan2(y, x)) + 360) % 360;
+    return brng;
+}
