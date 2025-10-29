@@ -1,200 +1,162 @@
-// src/components/ARView.js
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-function ARView({ onBack }) {
-    const mountRef = useRef(null);
+const SIT_FRONT_GATE = {
+    lat: 13.331624095990712,
+    lon: 77.12728232145311,
+};
+
+const ARView = ({ onBack }) => {
+    const containerRef = useRef(null);
+    const arrowRef = useRef(null);
 
     useEffect(() => {
-        let renderer, camera, scene, video, videoTexture, videoMesh, arrow;
-        let currentHeading = 0;
-        const targetCoords = { lat: 13.331624095990712, lon: 77.12728232145311 };
+        let scene, camera, renderer, arrow, watchId;
+        const loader = new GLTFLoader();
 
-        // === VIDEO SETUP ===
-        video = document.createElement("video");
-        video.autoplay = true;
-        video.muted = true;
-        video.playsInline = true;
+        // Create scene
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.6, 0);
+
+        renderer = new THREE.WebGLRenderer({ alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        containerRef.current.appendChild(renderer.domElement);
+
+        // Lighting
+        const light = new THREE.DirectionalLight(0xffffff, 2);
+        light.position.set(0, 5, 5);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+        // Load Arrow Model
+        loader.load(
+            "/RedArrow.glb",
+            (gltf) => {
+                arrow = gltf.scene;
+                arrow.scale.set(0.4, 0.4, 0.4); // Adjust size
+                arrow.rotation.x = -Math.PI / 6; // Tilt forward
+                arrow.position.set(0, 0, -2); // Slightly in front of the camera
+                scene.add(arrow);
+                arrowRef.current = arrow;
+                console.log("✅ Arrow model loaded and added to scene.");
+            },
+            undefined,
+            (error) => {
+                console.error("❌ Error loading arrow model:", error);
+            }
+        );
+
+        // Camera feed setup
+        const video = document.createElement("video");
+        video.setAttribute("autoplay", "");
+        video.setAttribute("playsinline", "");
+        video.style.position = "fixed";
+        video.style.top = "0";
+        video.style.left = "0";
+        video.style.width = "100vw";
+        video.style.height = "100vh";
+        video.style.objectFit = "cover";
+        video.style.zIndex = "-1";
+        document.body.appendChild(video);
 
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" } })
             .then((stream) => {
                 video.srcObject = stream;
-                video.play();
             })
-            .catch((err) => console.error("Camera access failed:", err));
+            .catch((err) => console.error("Camera access error:", err));
 
-        // === THREE.JS SETUP ===
-        scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(
-            75,
-            window.innerWidth / window.innerHeight,
-            0.1,
-            1000
-        );
-        camera.position.z = 0;
-
-        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x000000, 0);
-        mountRef.current.appendChild(renderer.domElement);
-
-        // === VIDEO BACKGROUND ===
-        videoTexture = new THREE.VideoTexture(video);
-        const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
-        const updateVideoPlane = () => {
-            if (video.videoWidth && video.videoHeight) {
-                const videoAspect = video.videoWidth / video.videoHeight;
-                const screenAspect = window.innerWidth / window.innerHeight;
-
-                let geometry;
-                if (videoAspect > screenAspect) {
-                    geometry = new THREE.PlaneGeometry(16 * videoAspect, 16);
-                } else {
-                    geometry = new THREE.PlaneGeometry(16, 16 / videoAspect);
-                }
-
-                if (videoMesh) scene.remove(videoMesh);
-                videoMesh = new THREE.Mesh(geometry, videoMaterial);
-                videoMesh.position.z = -10;
-                scene.add(videoMesh);
-            }
-        };
-
-        video.addEventListener("loadedmetadata", updateVideoPlane);
-        window.addEventListener("resize", () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            updateVideoPlane();
-        });
-
-        // === LIGHTS ===
-        const ambient = new THREE.AmbientLight(0xffffff, 2);
-        const directional = new THREE.DirectionalLight(0xffffff, 1);
-        directional.position.set(1, 1, 1);
-        scene.add(ambient, directional);
-
-        // === DEBUG CUBE ===
-        const cube = new THREE.Mesh(
-            new THREE.BoxGeometry(0.3, 0.3, 0.3),
-            new THREE.MeshStandardMaterial({ color: 0x00ff00 })
-        );
-        cube.position.z = -2;
-        scene.add(cube);
-
-        // === LOAD ARROW MODEL ===
-        const loader = new GLTFLoader();
-        loader.load(
-            "/RedArrow.glb",
-            (gltf) => {
-                arrow = gltf.scene;
-                arrow.scale.set(4, 4, 4); // Bigger so it's clearly visible
-                arrow.position.set(0, -0.5, -3);
-                arrow.rotation.x = -Math.PI / 4; // Slant forward
-                scene.add(arrow);
-                console.log("✅ Arrow model loaded and added to scene.");
-            },
-            undefined,
-            (err) => {
-                console.error("❌ Error loading arrow model:", err);
-                // fallback red arrow
-                const arrowGeo = new THREE.ConeGeometry(0.3, 1, 16);
-                const arrowMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-                arrow = new THREE.Mesh(arrowGeo, arrowMat);
-                arrow.position.set(0, -0.5, -3);
-                arrow.rotation.x = -Math.PI / 4;
-                scene.add(arrow);
-            }
-        );
-
-        // === BEARING CALCULATION ===
-        const computeBearing = (lat1, lon1, lat2, lon2) => {
+        // Function to calculate bearing between two GPS points
+        function calculateBearing(lat1, lon1, lat2, lon2) {
             const toRad = (deg) => (deg * Math.PI) / 180;
-            const dLon = toRad(lon2 - lon1);
-            const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
             const x =
                 Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
             const brng = Math.atan2(y, x);
             return ((brng * 180) / Math.PI + 360) % 360;
-        };
+        }
 
-        // === GPS TRACKING ===
-        let userLat = null;
-        let userLon = null;
+        // Track user location and rotation
+        let currentBearing = 0;
+
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener("deviceorientationabsolute", (event) => {
+                if (event.alpha != null) {
+                    currentBearing = event.alpha; // Compass heading
+                }
+            });
+        }
+
+        // Watch position
         if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(
+            watchId = navigator.geolocation.watchPosition(
                 (pos) => {
-                    userLat = pos.coords.latitude;
-                    userLon = pos.coords.longitude;
+                    const { latitude, longitude } = pos.coords;
+                    const targetBearing = calculateBearing(latitude, longitude, SIT_FRONT_GATE.lat, SIT_FRONT_GATE.lon);
+                    const relativeBearing = ((targetBearing - currentBearing) + 360) % 360;
+
+                    if (arrowRef.current) {
+                        arrowRef.current.rotation.y = THREE.MathUtils.degToRad(relativeBearing);
+                    }
                 },
-                (err) => console.warn("GPS Error:", err),
-                { enableHighAccuracy: true, maximumAge: 1000 }
+                (err) => console.error("Geolocation error:", err),
+                { enableHighAccuracy: true }
             );
         }
 
-        // === COMPASS TRACKING ===
-        window.addEventListener("deviceorientationabsolute", (event) => {
-            if (event.alpha != null) {
-                currentHeading = 360 - event.alpha;
-            }
-        });
-
-        // === ANIMATION LOOP ===
+        // Animation loop
         const animate = () => {
             requestAnimationFrame(animate);
-            cube.rotation.y += 0.01;
-
-            if (arrow && userLat && userLon) {
-                const bearing = computeBearing(userLat, userLon, targetCoords.lat, targetCoords.lon);
-                const relativeAngle = ((bearing - currentHeading + 360) % 360) * (Math.PI / 180);
-                arrow.rotation.y = relativeAngle;
-            }
-
             renderer.render(scene, camera);
         };
         animate();
 
-        // === CLEANUP ===
+        // Handle resize
+        const handleResize = () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+        window.addEventListener("resize", handleResize);
+
         return () => {
-            if (mountRef.current?.firstChild)
-                mountRef.current.removeChild(mountRef.current.firstChild);
-            if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
-            window.removeEventListener("resize", updateVideoPlane);
+            if (watchId) navigator.geolocation.clearWatch(watchId);
+            window.removeEventListener("resize", handleResize);
+            if (renderer) {
+                renderer.dispose();
+                if (renderer.domElement && containerRef.current?.contains(renderer.domElement)) {
+                    containerRef.current.removeChild(renderer.domElement);
+                }
+            }
+            const videos = document.querySelectorAll("video");
+            videos.forEach((v) => v.remove());
         };
     }, []);
 
     return (
-        <div
-            ref={mountRef}
-            style={{
-                height: "100vh",
-                width: "100vw",
-                position: "relative",
-                overflow: "hidden",
-                background: "black",
-            }}
-        >
+        <div ref={containerRef} style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
             <button
                 onClick={onBack}
                 style={{
                     position: "absolute",
-                    top: "10px",
-                    left: "10px",
+                    top: 20,
+                    left: 20,
                     zIndex: 10,
-                    background: "rgba(0,0,0,0.6)",
+                    background: "rgba(0,0,0,0.5)",
                     color: "white",
-                    border: "1px solid #fff",
+                    padding: "10px 20px",
                     borderRadius: "8px",
-                    padding: "8px 12px",
+                    border: "none",
                 }}
             >
-                ← Back
+                Back
             </button>
         </div>
     );
-}
+};
 
 export default ARView;
