@@ -7,6 +7,8 @@ const ARView = ({ onBack }) => {
 
     useEffect(() => {
         let renderer, camera, scene, video, videoTexture, videoMesh, arrow;
+        let currentHeading = 0;
+        const targetCoords = { lat: 13.331624095990712, lon: 77.12728232145311 };
 
         // === VIDEO SETUP ===
         video = document.createElement("video");
@@ -37,10 +39,9 @@ const ARView = ({ onBack }) => {
         renderer.setClearColor(0x000000, 0);
         mountRef.current.appendChild(renderer.domElement);
 
-        // === VIDEO BACKGROUND (Dynamic Aspect Ratio) ===
+        // === VIDEO BACKGROUND ===
         videoTexture = new THREE.VideoTexture(video);
         const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
-
         const updateVideoPlane = () => {
             if (video.videoWidth && video.videoHeight) {
                 const videoAspect = video.videoWidth / video.videoHeight;
@@ -92,25 +93,56 @@ const ARView = ({ onBack }) => {
                 arrow.rotation.x = -Math.PI / 4;
                 arrow.position.set(0, -0.2, -2);
                 scene.add(arrow);
-                console.log("✅ Arrow model loaded and added to scene:", arrow);
             },
             undefined,
-            (err) => console.error("❌ Error loading model:", err)
+            (err) => console.error("Error loading arrow:", err)
         );
 
-        // === DEBUG BOX AT ARROW POSITION ===
-        const debugBox = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 0.1, 0.1),
-            new THREE.MeshBasicMaterial({ color: 0xff0000 })
-        );
-        debugBox.position.set(0, -0.2, -2);
-        scene.add(debugBox);
+        // === COMPUTE BEARING ===
+        const computeBearing = (lat1, lon1, lat2, lon2) => {
+            const toRad = (deg) => (deg * Math.PI) / 180;
+            const dLon = toRad(lon2 - lon1);
+            const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            const x =
+                Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+            const brng = Math.atan2(y, x);
+            return ((brng * 180) / Math.PI + 360) % 360;
+        };
+
+        // === TRACK USER LOCATION ===
+        let userLat = null;
+        let userLon = null;
+
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    userLat = pos.coords.latitude;
+                    userLon = pos.coords.longitude;
+                },
+                (err) => console.warn("GPS Error:", err),
+                { enableHighAccuracy: true, maximumAge: 1000 }
+            );
+        }
+
+        // === TRACK DEVICE ORIENTATION ===
+        window.addEventListener("deviceorientationabsolute", (event) => {
+            if (event.alpha != null) {
+                currentHeading = 360 - event.alpha; // Alpha gives compass heading
+            }
+        });
 
         // === ANIMATION LOOP ===
         const animate = () => {
             requestAnimationFrame(animate);
             cube.rotation.y += 0.01;
-            if (arrow) arrow.rotation.y += 0.005;
+
+            if (arrow && userLat && userLon) {
+                const bearing = computeBearing(userLat, userLon, targetCoords.lat, targetCoords.lon);
+                const relativeAngle = ((bearing - currentHeading + 360) % 360) * (Math.PI / 180);
+                arrow.rotation.y = relativeAngle;
+            }
+
             renderer.render(scene, camera);
         };
         animate();
@@ -123,6 +155,7 @@ const ARView = ({ onBack }) => {
             window.removeEventListener("resize", updateVideoPlane);
         };
     }, []);
+
 
     return (
         <div
