@@ -15,7 +15,7 @@ const ARView = ({ onBack }) => {
         let scene, camera, renderer, arrow, watchId;
         const loader = new GLTFLoader();
 
-        // Create scene
+        // === Scene, Camera, Renderer ===
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 1.6, 0);
@@ -25,31 +25,29 @@ const ARView = ({ onBack }) => {
         renderer.setPixelRatio(window.devicePixelRatio);
         containerRef.current.appendChild(renderer.domElement);
 
-        // Lighting
+        // === Lighting ===
         const light = new THREE.DirectionalLight(0xffffff, 2);
         light.position.set(0, 5, 5);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-        // Load Arrow Model
+        // === Load Arrow Model ===
         loader.load(
             "/RedArrow.glb",
             (gltf) => {
                 arrow = gltf.scene;
-                arrow.scale.set(0.4, 0.4, 0.4); // Adjust size
+                arrow.scale.set(0.4, 0.4, 0.4);
                 arrow.rotation.x = -Math.PI / 6; // Tilt forward
-                arrow.position.set(0, 0, -2); // Slightly in front of the camera
+                arrow.position.set(0, 0, -2); // In front of camera
                 scene.add(arrow);
                 arrowRef.current = arrow;
-                console.log("✅ Arrow model loaded and added to scene.");
+                console.log("✅ Arrow model loaded.");
             },
             undefined,
-            (error) => {
-                console.error("❌ Error loading arrow model:", error);
-            }
+            (error) => console.error("❌ Arrow load error:", error)
         );
 
-        // Camera feed setup
+        // === Camera Feed ===
         const video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
@@ -64,12 +62,10 @@ const ARView = ({ onBack }) => {
 
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" } })
-            .then((stream) => {
-                video.srcObject = stream;
-            })
+            .then((stream) => (video.srcObject = stream))
             .catch((err) => console.error("Camera access error:", err));
 
-        // Function to calculate bearing between two GPS points
+        // === Utility: Bearing Calculation ===
         function calculateBearing(lat1, lon1, lat2, lon2) {
             const toRad = (deg) => (deg * Math.PI) / 180;
             const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
@@ -80,42 +76,50 @@ const ARView = ({ onBack }) => {
             return ((brng * 180) / Math.PI + 360) % 360;
         }
 
-        // Track user location and rotation
-        let currentBearing = 0;
+        // === Device Orientation + GPS Tracking ===
+        let deviceHeading = 0; // current compass heading
+        let targetBearing = 0; // angle to target
+        let relativeBearing = 0;
 
-        if (window.DeviceOrientationEvent) {
-            window.addEventListener("deviceorientationabsolute", (event) => {
-                if (event.alpha != null) {
-                    currentBearing = event.alpha; // Compass heading
-                }
-            });
-        }
+        // Listen for orientation changes
+        window.addEventListener("deviceorientation", (event) => {
+            if (event.absolute || event.webkitCompassHeading !== undefined) {
+                // iOS Safari
+                deviceHeading = event.webkitCompassHeading || 0;
+            } else if (event.alpha !== null) {
+                // Android Chrome (convert alpha to compass heading)
+                deviceHeading = 360 - event.alpha;
+            }
+        });
 
-        // Watch position
+        // Watch GPS position
         if (navigator.geolocation) {
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { latitude, longitude } = pos.coords;
-                    const targetBearing = calculateBearing(latitude, longitude, SIT_FRONT_GATE.lat, SIT_FRONT_GATE.lon);
-                    const relativeBearing = ((targetBearing - currentBearing) + 360) % 360;
-
-                    if (arrowRef.current) {
-                        arrowRef.current.rotation.y = THREE.MathUtils.degToRad(relativeBearing);
-                    }
+                    targetBearing = calculateBearing(latitude, longitude, SIT_FRONT_GATE.lat, SIT_FRONT_GATE.lon);
                 },
                 (err) => console.error("Geolocation error:", err),
                 { enableHighAccuracy: true }
             );
         }
 
-        // Animation loop
+        // === Animate Loop ===
         const animate = () => {
             requestAnimationFrame(animate);
+
+            if (arrowRef.current) {
+                relativeBearing = ((targetBearing - deviceHeading) + 360) % 360;
+                const targetRotation = THREE.MathUtils.degToRad(relativeBearing);
+                // Smooth interpolation for smoother motion
+                arrowRef.current.rotation.y += (targetRotation - arrowRef.current.rotation.y) * 0.1;
+            }
+
             renderer.render(scene, camera);
         };
         animate();
 
-        // Handle resize
+        // === Resize ===
         const handleResize = () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -123,17 +127,18 @@ const ARView = ({ onBack }) => {
         };
         window.addEventListener("resize", handleResize);
 
+        // === Cleanup ===
         return () => {
             if (watchId) navigator.geolocation.clearWatch(watchId);
             window.removeEventListener("resize", handleResize);
+            window.removeEventListener("deviceorientation", () => {});
             if (renderer) {
                 renderer.dispose();
                 if (renderer.domElement && containerRef.current?.contains(renderer.domElement)) {
                     containerRef.current.removeChild(renderer.domElement);
                 }
             }
-            const videos = document.querySelectorAll("video");
-            videos.forEach((v) => v.remove());
+            document.querySelectorAll("video").forEach((v) => v.remove());
         };
     }, []);
 
