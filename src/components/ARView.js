@@ -1,8 +1,9 @@
+// src/components/ARView.js
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 
-const ARView = ({ onBack }) => {
+function ARView({ onBack }) {
     const mountRef = useRef(null);
 
     useEffect(() => {
@@ -90,7 +91,7 @@ const ARView = ({ onBack }) => {
             (gltf) => {
                 arrow = gltf.scene;
                 arrow.scale.set(1.5, 1.5, 1.5);
-                arrow.rotation.x = -Math.PI / 4;
+                arrow.rotation.x = -Math.PI / 4; // slanted forward
                 arrow.position.set(0, -0.2, -2);
                 scene.add(arrow);
             },
@@ -98,7 +99,7 @@ const ARView = ({ onBack }) => {
             (err) => console.error("Error loading arrow:", err)
         );
 
-        // === COMPUTE BEARING ===
+        // === BEARING CALCULATION ===
         const computeBearing = (lat1, lon1, lat2, lon2) => {
             const toRad = (deg) => (deg * Math.PI) / 180;
             const dLon = toRad(lon2 - lon1);
@@ -110,7 +111,7 @@ const ARView = ({ onBack }) => {
             return ((brng * 180) / Math.PI + 360) % 360;
         };
 
-        // === TRACK USER LOCATION ===
+        // === GPS TRACKING ===
         let userLat = null;
         let userLon = null;
 
@@ -125,10 +126,10 @@ const ARView = ({ onBack }) => {
             );
         }
 
-        // === TRACK DEVICE ORIENTATION ===
+        // === COMPASS TRACKING ===
         window.addEventListener("deviceorientationabsolute", (event) => {
             if (event.alpha != null) {
-                currentHeading = 360 - event.alpha; // Alpha gives compass heading
+                currentHeading = 360 - event.alpha; // alpha gives compass heading
             }
         });
 
@@ -156,34 +157,35 @@ const ARView = ({ onBack }) => {
         };
     }, []);
 
-
     return (
         <div
             ref={mountRef}
             style={{
-                width: "100vw",
                 height: "100vh",
-                overflow: "hidden",
+                width: "100vw",
                 position: "relative",
+                overflow: "hidden",
+                background: "black",
             }}
         >
             <button
                 onClick={onBack}
                 style={{
                     position: "absolute",
-                    top: "20px",
-                    left: "20px",
+                    top: "10px",
+                    left: "10px",
                     zIndex: 10,
-                    padding: "8px 12px",
+                    background: "rgba(0,0,0,0.6)",
+                    color: "white",
+                    border: "1px solid #fff",
                     borderRadius: "8px",
-                    border: "none",
-                    background: "rgba(255,255,255,0.8)",
+                    padding: "8px 12px",
                 }}
             >
-                Back
+                ← Back
             </button>
         </div>
     );
-};
+}
 
 export default ARView;
