@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -10,6 +10,7 @@ const SIT_FRONT_GATE = {
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
+    const [debug, setDebug] = useState({ heading: 0, bearing: 0, relative: 0 });
 
     useEffect(() => {
         let scene, camera, renderer, watchId;
@@ -31,53 +32,55 @@ const ARView = ({ onBack }) => {
         containerRef.current.appendChild(renderer.domElement);
 
         // === Lighting ===
-        scene.add(new THREE.AmbientLight(0xffffff, 1));
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const dirLight = new THREE.DirectionalLight(0xffffff, 2);
         dirLight.position.set(0, 5, 5);
         scene.add(dirLight);
 
-        // === Create Arrow Group (so we can rotate the whole group) ===
+        // === Arrow Group ===
         const arrowGroup = new THREE.Group();
-        arrowGroup.position.set(0, 0, -3); // 3m in front of camera
+        arrowGroup.position.set(0, 0, -3);
         scene.add(arrowGroup);
         arrowGroupRef.current = arrowGroup;
 
-        // === Load Arrow Model ===
+        // === Load Arrow ===
         loader.load(
             "/RedArrow.glb",
             (gltf) => {
-                const arrowModel = gltf.scene;
-                arrowModel.scale.set(0.4, 0.4, 0.4);
-                arrowModel.rotation.x = -Math.PI / 4; // slant forward
-                arrowModel.position.set(0, -0.5, 0);
-                arrowGroup.add(arrowModel);
-                console.log("✅ Arrow model loaded");
+                const arrow = gltf.scene;
+                arrow.scale.set(0.4, 0.4, 0.4);
+                arrow.rotation.x = -Math.PI / 4;
+                arrow.position.set(0, -0.5, 0);
+                arrowGroup.add(arrow);
+                console.log("✅ Arrow loaded");
             },
             undefined,
-            (error) => console.error("❌ Error loading arrow:", error)
+            (err) => console.error("❌ Error loading arrow:", err)
         );
 
         // === Camera Feed ===
         const video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
-        video.style.position = "fixed";
-        video.style.top = "0";
-        video.style.left = "0";
-        video.style.width = "100vw";
-        video.style.height = "100vh";
-        video.style.objectFit = "cover";
-        video.style.zIndex = "-1";
+        Object.assign(video.style, {
+            position: "fixed",
+            top: "0",
+            left: "0",
+            width: "100vw",
+            height: "100vh",
+            objectFit: "cover",
+            zIndex: "-1",
+        });
         document.body.appendChild(video);
 
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" } })
             .then((stream) => (video.srcObject = stream))
-            .catch((err) => console.error("Camera access error:", err));
+            .catch((err) => console.error("Camera error:", err));
 
-        // === Utility: Bearing Calculation ===
+        // === Bearing Calculator ===
+        const toRad = (deg) => (deg * Math.PI) / 180;
         function calculateBearing(lat1, lon1, lat2, lon2) {
-            const toRad = (deg) => (deg * Math.PI) / 180;
             const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
             const x =
                 Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
@@ -88,15 +91,16 @@ const ARView = ({ onBack }) => {
             return ((brng * 180) / Math.PI + 360) % 360;
         }
 
-        // === Orientation & Location Tracking ===
+        // === Tracking ===
         let deviceHeading = 0;
         let targetBearing = 0;
+        let bearingOffset = 0; // 🔧 manual offset (try 0, 90, 180, -90)
 
         window.addEventListener("deviceorientation", (event) => {
             if (event.webkitCompassHeading !== undefined) {
-                deviceHeading = event.webkitCompassHeading;
+                deviceHeading = event.webkitCompassHeading; // iOS
             } else if (event.alpha !== null) {
-                deviceHeading = 360 - event.alpha;
+                deviceHeading = 360 - event.alpha; // Android
             }
         });
 
@@ -116,18 +120,20 @@ const ARView = ({ onBack }) => {
             );
         }
 
-        // === Animate Rotation ===
+        // === Animate ===
         const animate = () => {
             requestAnimationFrame(animate);
 
             if (arrowGroupRef.current) {
-                // Calculate the relative angle between device heading and target bearing
-                const relativeBearing = ((targetBearing - deviceHeading) + 360) % 360;
-                const targetRotationY = THREE.MathUtils.degToRad(relativeBearing);
+                let relative = (targetBearing - deviceHeading + bearingOffset + 360) % 360;
+                const targetY = THREE.MathUtils.degToRad(relative);
+                arrowGroupRef.current.rotation.y += (targetY - arrowGroupRef.current.rotation.y) * 0.15;
 
-                // Smoothly rotate the arrow group
-                arrowGroupRef.current.rotation.y +=
-                    (targetRotationY - arrowGroupRef.current.rotation.y) * 0.15;
+                setDebug({
+                    heading: deviceHeading.toFixed(1),
+                    bearing: targetBearing.toFixed(1),
+                    relative: relative.toFixed(1),
+                });
             }
 
             renderer.render(scene, camera);
@@ -135,27 +141,28 @@ const ARView = ({ onBack }) => {
         animate();
 
         // === Resize ===
-        const handleResize = () => {
+        const onResize = () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         };
-        window.addEventListener("resize", handleResize);
+        window.addEventListener("resize", onResize);
 
         // === Cleanup ===
         return () => {
             if (watchId) navigator.geolocation.clearWatch(watchId);
-            window.removeEventListener("resize", handleResize);
+            window.removeEventListener("resize", onResize);
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
         };
     }, []);
 
     return (
-        <div
-            ref={containerRef}
-            style={{ width: "100vw", height: "100vh", overflow: "hidden" }}
-        >
+        <>
+            <div
+                ref={containerRef}
+                style={{ width: "100vw", height: "100vh", overflow: "hidden" }}
+            />
             <button
                 onClick={onBack}
                 style={{
@@ -172,7 +179,27 @@ const ARView = ({ onBack }) => {
             >
                 Back
             </button>
-        </div>
+
+            {/* === Debug Overlay === */}
+            <div
+                style={{
+                    position: "absolute",
+                    bottom: 20,
+                    left: 20,
+                    zIndex: 10,
+                    background: "rgba(0,0,0,0.5)",
+                    color: "#0f0",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontFamily: "monospace",
+                    fontSize: "14px",
+                }}
+            >
+                <div>Heading: {debug.heading}°</div>
+                <div>Bearing: {debug.bearing}°</div>
+                <div>Relative: {debug.relative}°</div>
+            </div>
+        </>
     );
 };
 
