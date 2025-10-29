@@ -10,7 +10,6 @@
     "aframe": "^1.7.1",
     "axios": "^1.12.2",
     "framer-motion": "^12.23.24",
-    "mind-ar": "^1.2.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-scripts": "5.0.1",
