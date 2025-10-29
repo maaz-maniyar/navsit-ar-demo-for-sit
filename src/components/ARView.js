@@ -90,13 +90,23 @@ function ARView({ onBack }) {
             "/RedArrow.glb",
             (gltf) => {
                 arrow = gltf.scene;
-                arrow.scale.set(1.5, 1.5, 1.5);
-                arrow.rotation.x = -Math.PI / 4; // slanted forward
-                arrow.position.set(0, -0.2, -2);
+                arrow.scale.set(4, 4, 4); // Bigger so it's clearly visible
+                arrow.position.set(0, -0.5, -3);
+                arrow.rotation.x = -Math.PI / 4; // Slant forward
                 scene.add(arrow);
+                console.log("✅ Arrow model loaded and added to scene.");
             },
             undefined,
-            (err) => console.error("Error loading arrow:", err)
+            (err) => {
+                console.error("❌ Error loading arrow model:", err);
+                // fallback red arrow
+                const arrowGeo = new THREE.ConeGeometry(0.3, 1, 16);
+                const arrowMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+                arrow = new THREE.Mesh(arrowGeo, arrowMat);
+                arrow.position.set(0, -0.5, -3);
+                arrow.rotation.x = -Math.PI / 4;
+                scene.add(arrow);
+            }
         );
 
         // === BEARING CALCULATION ===
@@ -114,7 +124,6 @@ function ARView({ onBack }) {
         // === GPS TRACKING ===
         let userLat = null;
         let userLon = null;
-
         if (navigator.geolocation) {
             navigator.geolocation.watchPosition(
                 (pos) => {
@@ -129,7 +138,7 @@ function ARView({ onBack }) {
         // === COMPASS TRACKING ===
         window.addEventListener("deviceorientationabsolute", (event) => {
             if (event.alpha != null) {
-                currentHeading = 360 - event.alpha; // alpha gives compass heading
+                currentHeading = 360 - event.alpha;
             }
         });
 
