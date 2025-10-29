@@ -34,25 +34,26 @@ const ARView = ({ onBack }) => {
 
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x000000, 0); // transparent
+        renderer.setClearColor(0x000000, 0); // transparent background
         mountRef.current.appendChild(renderer.domElement);
 
-        // === VIDEO TEXTURE AS BACKGROUND ===
+        // === VIDEO BACKGROUND ===
         videoTexture = new THREE.VideoTexture(video);
         const videoGeometry = new THREE.PlaneGeometry(16, 9);
-        videoGeometry.scale(1, 1, 1);
         const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
         const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
-        videoMesh.position.z = -5;
+        videoMesh.position.z = -10;
         scene.add(videoMesh);
 
         // === LIGHTS ===
         const ambient = new THREE.AmbientLight(0xffffff, 2);
-        scene.add(ambient);
+        const directional = new THREE.DirectionalLight(0xffffff, 1);
+        directional.position.set(1, 1, 1);
+        scene.add(ambient, directional);
 
-        // === DEBUG CUBE (just to verify rendering) ===
+        // === DEBUG CUBE ===
         const cube = new THREE.Mesh(
-            new THREE.BoxGeometry(0.5, 0.5, 0.5),
+            new THREE.BoxGeometry(0.3, 0.3, 0.3),
             new THREE.MeshStandardMaterial({ color: 0x00ff00 })
         );
         cube.position.z = -2;
@@ -64,30 +65,38 @@ const ARView = ({ onBack }) => {
             "/RedArrow.glb",
             (gltf) => {
                 arrow = gltf.scene;
-                arrow.scale.set(0.1, 0.1, 0.1);
-                arrow.rotation.x = -Math.PI / 3; // tilt forward
-                arrow.position.set(0, -0.5, -2);
+                arrow.scale.set(1.5, 1.5, 1.5); // make it large enough
+                arrow.rotation.x = -Math.PI / 4; // tilt slightly forward
+                arrow.position.set(0, -0.2, -2); // put just in front of cube
                 scene.add(arrow);
-                console.log("✅ Arrow model loaded");
+                console.log("✅ Arrow model loaded and added to scene:", arrow);
             },
             undefined,
             (err) => console.error("❌ Error loading model:", err)
         );
 
+        // === DEBUG BOX AT ARROW POSITION ===
+        const debugBox = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.1, 0.1),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        );
+        debugBox.position.set(0, -0.2, -2);
+        scene.add(debugBox);
+
         // === ANIMATION LOOP ===
         const animate = () => {
             requestAnimationFrame(animate);
-            if (cube) cube.rotation.y += 0.01;
+            cube.rotation.y += 0.01;
+            if (arrow) arrow.rotation.y += 0.005; // slow rotation for visibility
             renderer.render(scene, camera);
         };
         animate();
 
+        // === CLEANUP ===
         return () => {
             if (mountRef.current?.firstChild)
                 mountRef.current.removeChild(mountRef.current.firstChild);
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach((t) => t.stop());
-            }
+            if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
         };
     }, []);
 
