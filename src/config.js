@@ -1,1 +1,3 @@
-export const BASE_URL = "https://navsit-backend-production.up.railway.app";
+// src/config.js
+export const BASE_URL = "https://navsit-backend-production.up.railway.app/api";
+

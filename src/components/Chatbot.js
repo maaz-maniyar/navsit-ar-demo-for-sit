@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { BASE_URL } from "../config";
 
-function Chatbot({ onNavigationStart }) {
+function Chatbot({ setShowAR, setNextNodeCoords }) {
     const [message, setMessage] = useState("");
     const [chatHistory, setChatHistory] = useState([
         {
@@ -11,6 +11,7 @@ function Chatbot({ onNavigationStart }) {
     ]);
     const [loading, setLoading] = useState(false);
 
+    // Get user GPS location
     const getLocation = () => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) reject("Geolocation not supported");
@@ -19,7 +20,7 @@ function Chatbot({ onNavigationStart }) {
                     (pos) =>
                         resolve({
                             latitude: pos.coords.latitude,
-                            longitude: pos.coords.longitude
+                            longitude: pos.coords.longitude,
                         }),
                     (err) => reject(err)
                 );
@@ -37,39 +38,38 @@ function Chatbot({ onNavigationStart }) {
 
         try {
             const coords = await getLocation().catch(() => null);
-            const res = await fetch(`${BASE_URL}/api/chat`, {
+            const res = await fetch(`${BASE_URL}/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     message: userMessage,
                     latitude: coords?.latitude,
-                    longitude: coords?.longitude
-                })
+                    longitude: coords?.longitude,
+                }),
             });
 
             if (!res.ok) throw new Error("Backend error");
             const data = await res.json();
-            const botReply = data.reply || "I'm not sure how to respond.";
 
-            // Add bot reply
-            setChatHistory((prev) => [...prev, { sender: "bot", text: botReply }]);
+            // If backend returns navigation data (next node + coordinates)
+            if (data.nextNode && data.coordinates) {
+                setChatHistory((prev) => [
+                    ...prev,
+                    { sender: "bot", text: data.reply || `Navigating to ${data.nextNode}...` },
+                ]);
 
-            // If backend returned path & coordinates => start navigation
-            if (Array.isArray(data.coordinates) && data.coordinates.length > 1) {
-                // The backend returns coordinates as [[lat,lng], [lat,lng], ...]
-                const [lat, lng] = data.coordinates[1]; // pick the next node after user's current node
-                const nextCoords = { lat, lng };
-                const payload = {
-                    nextCoords,
-                    path: data.path || null,
-                    nextNode: data.nextNode || null,
-                    reply: botReply
-                };
-
-                // Give state a moment then switch to AR mode via callback from App
+                setNextNodeCoords(data.coordinates);
                 setTimeout(() => {
-                    if (typeof onNavigationStart === "function") onNavigationStart(payload);
+                    console.log("Switching to AR mode with coords:", data.coordinates);
+                    setShowAR(true);
                 }, 300);
+            } else if (data.reply) {
+                setChatHistory((prev) => [...prev, { sender: "bot", text: data.reply }]);
+            } else {
+                setChatHistory((prev) => [
+                    ...prev,
+                    { sender: "bot", text: "I'm not sure how to respond to that." },
+                ]);
             }
         } catch (err) {
             console.error(err);
@@ -77,8 +77,8 @@ function Chatbot({ onNavigationStart }) {
                 ...prev,
                 {
                     sender: "bot",
-                    text: "Oops! Couldn't reach the server. Please try again."
-                }
+                    text: "Oops! Couldn't reach the server. Please try again.",
+                },
             ]);
         } finally {
             setLoading(false);
@@ -95,7 +95,7 @@ function Chatbot({ onNavigationStart }) {
                 color: "white",
                 fontFamily: "Poppins, sans-serif",
                 padding: "1rem",
-                position: "relative"
+                position: "relative",
             }}
         >
             {/* Header */}
@@ -104,7 +104,7 @@ function Chatbot({ onNavigationStart }) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    marginBottom: "1rem"
+                    marginBottom: "1rem",
                 }}
             >
                 <h2 style={{ color: "#4CAF50", margin: 0 }}>NavSIT</h2>
@@ -116,7 +116,7 @@ function Chatbot({ onNavigationStart }) {
                         width: "45px",
                         borderRadius: "8px",
                         objectFit: "cover",
-                        boxShadow: "0 0 10px rgba(0,0,0,0.4)"
+                        boxShadow: "0 0 10px rgba(0,0,0,0.4)",
                     }}
                 />
             </div>
@@ -129,7 +129,7 @@ function Chatbot({ onNavigationStart }) {
                     borderRadius: "10px",
                     padding: "1rem",
                     background: "rgba(255,255,255,0.05)",
-                    boxShadow: "0 0 10px rgba(0,0,0,0.3)"
+                    boxShadow: "0 0 10px rgba(0,0,0,0.3)",
                 }}
             >
                 {chatHistory.map((msg, idx) => (
@@ -137,22 +137,21 @@ function Chatbot({ onNavigationStart }) {
                         key={idx}
                         style={{
                             textAlign: msg.sender === "user" ? "right" : "left",
-                            margin: "0.5rem 0"
+                            margin: "0.5rem 0",
                         }}
                     >
-            <span
-                style={{
-                    display: "inline-block",
-                    background: msg.sender === "user" ? "#4CAF50" : "#333",
-                    padding: "0.7rem 1rem",
-                    borderRadius: "15px",
-                    maxWidth: "70%",
-                    color: "white",
-                    wordWrap: "break-word"
-                }}
-            >
-              {msg.text}
-            </span>
+                        <span
+                            style={{
+                                display: "inline-block",
+                                background: msg.sender === "user" ? "#4CAF50" : "#333",
+                                padding: "0.7rem 1rem",
+                                borderRadius: "15px",
+                                maxWidth: "70%",
+                                color: "white",
+                            }}
+                        >
+                            {msg.text}
+                        </span>
                     </div>
                 ))}
                 {loading && <p style={{ opacity: 0.6 }}>Thinking...</p>}
@@ -172,7 +171,7 @@ function Chatbot({ onNavigationStart }) {
                         border: "none",
                         outline: "none",
                         background: "#222",
-                        color: "white"
+                        color: "white",
                     }}
                 />
                 <button
@@ -184,7 +183,7 @@ function Chatbot({ onNavigationStart }) {
                         background: "#4CAF50",
                         color: "white",
                         border: "none",
-                        cursor: "pointer"
+                        cursor: "pointer",
                     }}
                     disabled={loading}
                 >
