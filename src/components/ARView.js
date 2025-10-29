@@ -7,84 +7,99 @@ const ARView = ({ nextNodeCoords, onBack }) => {
 
     useEffect(() => {
         if (!nextNodeCoords) return;
-
         const container = containerRef.current;
         if (!container) return;
 
-        // === Setup ===
+        // === Scene, Camera, Renderer ===
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(
-            75,
+            70,
             window.innerWidth / window.innerHeight,
-            0.1,
-            1000
+            0.01,
+            100
         );
 
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(0, 10, 10);
-        scene.add(light);
+        // === Video background ===
+        const video = document.createElement("video");
+        video.setAttribute("autoplay", "");
+        video.setAttribute("muted", "");
+        video.setAttribute("playsinline", "");
+        video.style.display = "none";
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
+        navigator.mediaDevices
+            .getUserMedia({
+                video: { facingMode: { exact: "environment" } },
+                audio: false,
+            })
+            .then((stream) => {
+                video.srcObject = stream;
+                video.play();
 
-        // === Load the Arrow ===
-        const loader = new GLTFLoader();
-        let arrow;
-        loader.load(
-            process.env.PUBLIC_URL + "/models/RedArrow.glb",
-            (gltf) => {
-                arrow = gltf.scene;
-                arrow.scale.set(1.5, 1.5, 1.5);
-                scene.add(arrow);
-            },
-            undefined,
-            (error) => console.error("Error loading RedArrow.glb:", error)
-        );
+                const videoTexture = new THREE.VideoTexture(video);
+                videoTexture.minFilter = THREE.LinearFilter;
+                videoTexture.magFilter = THREE.LinearFilter;
+                videoTexture.format = THREE.RGBFormat;
 
-        camera.position.set(0, 1.5, 3);
+                const videoGeometry = new THREE.PlaneGeometry(2, 2);
+                const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
+                const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
+                videoMesh.material.depthTest = false;
+                videoMesh.material.depthWrite = false;
 
-        // === Animation Loop ===
-        const animate = () => {
-            requestAnimationFrame(animate);
+                const videoScene = new THREE.Scene();
+                const videoCamera = new THREE.Camera();
+                videoScene.add(videoMesh);
 
-            if (arrow && nextNodeCoords) {
-                // Simulate arrow facing the direction of the next node
-                // (for real AR, replace with compass-based orientation)
-                const dx = nextNodeCoords.lon - 77.127378;
-                const dz = nextNodeCoords.lat - 13.331748;
-                const targetAngle = Math.atan2(dx, dz);
-                arrow.rotation.y = targetAngle;
-            }
+                // === Lighting ===
+                const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+                scene.add(ambientLight);
 
-            renderer.render(scene, camera);
-        };
-        animate();
+                // === Load Arrow ===
+                const loader = new GLTFLoader();
+                let arrow;
+                loader.load(
+                    process.env.PUBLIC_URL + "/models/RedArrow.glb",
+                    (gltf) => {
+                        arrow = gltf.scene;
+                        arrow.scale.set(1.5, 1.5, 1.5);
+                        arrow.position.set(0, -1, -3);
+                        scene.add(arrow);
+                    },
+                    undefined,
+                    (err) => console.error("GLB load error:", err)
+                );
 
-        // === Handle window resize ===
-        const handleResize = () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        };
-        window.addEventListener("resize", handleResize);
+                // === Compass-based rotation ===
+                window.addEventListener("deviceorientationabsolute", (e) => {
+                    const heading = THREE.MathUtils.degToRad(e.alpha || 0);
+                    if (arrow) arrow.rotation.y = heading;
+                });
+
+                // === Animate ===
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    renderer.autoClear = false;
+                    renderer.clear();
+                    renderer.render(videoScene, videoCamera);
+                    renderer.render(scene, camera);
+                };
+                animate();
+            })
+            .catch((err) => {
+                console.error("Camera access error:", err);
+                alert("Camera permission denied or not available.");
+            });
 
         // === Cleanup ===
         return () => {
-            window.removeEventListener("resize", handleResize);
-
-            if (renderer) {
-                renderer.dispose();
-            }
-
             if (container && renderer.domElement && container.contains(renderer.domElement)) {
                 container.removeChild(renderer.domElement);
             }
-
+            renderer.dispose();
             scene.clear();
         };
     }, [nextNodeCoords]);
