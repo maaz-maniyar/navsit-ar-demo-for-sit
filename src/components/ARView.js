@@ -7,7 +7,7 @@ const ARView = ({ onBack }) => {
     const videoRef = useRef(null);
 
     useEffect(() => {
-        // === CAMERA SETUP ===
+        // === CAMERA FEED ===
         const video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("muted", "");
@@ -21,15 +21,12 @@ const ARView = ({ onBack }) => {
         videoRef.current = video;
         document.body.appendChild(video);
 
-        // Request camera feed
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" } })
             .then((stream) => {
                 video.srcObject = stream;
             })
-            .catch((err) => {
-                console.error("Camera access failed:", err);
-            });
+            .catch((err) => console.error("Camera access failed:", err));
 
         // === THREE.JS SETUP ===
         const scene = new THREE.Scene();
@@ -39,37 +36,61 @@ const ARView = ({ onBack }) => {
             0.1,
             1000
         );
-        camera.position.z = 3;
+        camera.position.set(0, 0, 3);
 
-        const renderer = new THREE.WebGLRenderer({ alpha: true });
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         mountRef.current.appendChild(renderer.domElement);
 
-        // Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 2);
-        light.position.set(0, 1, 2);
-        scene.add(light);
+        // === LIGHTS ===
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+        directionalLight.position.set(0, 5, 5);
+        scene.add(ambientLight, directionalLight);
 
-        // === LOAD THE ARROW MODEL ===
+        // === LOAD ARROW MODEL ===
         const loader = new GLTFLoader();
         let arrow;
-        loader.load("/RedArrow.glb", (gltf) => {
-            arrow = gltf.scene;
-            arrow.scale.set(0.5, 0.5, 0.5);
-            arrow.rotation.x = -Math.PI / 2; // slant forward
-            scene.add(arrow);
-        });
 
-        // === DEVICE ORIENTATION HANDLER ===
+        loader.load(
+            "/RedArrow.glb",
+            (gltf) => {
+                arrow = gltf.scene;
+                arrow.traverse((child) => {
+                    if (child.isMesh) {
+                        child.material.side = THREE.DoubleSide;
+                    }
+                });
+
+                arrow.scale.set(0.1, 0.1, 0.1); // adjust visibility
+                arrow.rotation.x = -Math.PI / 3; // slant forward
+                arrow.position.set(0, -0.5, -2); // place in front of camera
+                scene.add(arrow);
+                console.log("✅ Arrow loaded successfully:", arrow);
+            },
+            undefined,
+            (err) => {
+                console.error("Error loading arrow model:", err);
+            }
+        );
+
+        // === DEBUG BOX (if model missing) ===
+        const debugBox = new THREE.Mesh(
+            new THREE.BoxGeometry(0.3, 0.3, 0.3),
+            new THREE.MeshStandardMaterial({ color: 0xff0000 })
+        );
+        debugBox.position.set(0, 0, -2);
+        scene.add(debugBox);
+
+        // === DEVICE ORIENTATION ===
         const handleOrientation = (event) => {
-            if (!arrow) return;
-
             const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0;
             const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;
             const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0;
-
             const euler = new THREE.Euler(beta, alpha, -gamma, "YXZ");
-            arrow.setRotationFromEuler(euler);
+
+            if (arrow) arrow.setRotationFromEuler(euler);
+            else debugBox.setRotationFromEuler(euler);
         };
 
         window.addEventListener("deviceorientation", handleOrientation);
