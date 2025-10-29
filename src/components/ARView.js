@@ -94,7 +94,7 @@ const ARView = ({ onBack }) => {
         // === Tracking ===
         let deviceHeading = 0;
         let targetBearing = 0;
-        let bearingOffset = 0; // 🔧 manual offset (try 0, 90, 180, -90)
+        let bearingOffset = 90; // 🔧 manual offset (try 0, 90, 180, -90)
 
         window.addEventListener("deviceorientation", (event) => {
             if (event.webkitCompassHeading !== undefined) {
