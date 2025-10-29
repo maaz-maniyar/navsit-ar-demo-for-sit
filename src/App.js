@@ -4,23 +4,27 @@ import ARView from "./components/ARView";
 
 function App() {
     const [showAR, setShowAR] = useState(false);
-    const [nextNodeCoords, setNextNodeCoords] = useState(null);
+    const [navData, setNavData] = useState(null); // { nextCoords: {lat,lng}, path, nextNode }
+
+    const handleNavigationStart = (navPayload) => {
+        // navPayload: { nextCoords: { lat, lng }, path, nextNode, reply }
+        setNavData(navPayload);
+        setShowAR(true);
+    };
 
     return (
         <div style={{ height: "100vh", width: "100vw", overflow: "hidden" }}>
             {showAR ? (
                 <ARView
-                    nextNodeCoords={nextNodeCoords}
+                    nextNodeCoords={navData?.nextCoords}
+                    path={navData?.path}
                     onBack={() => {
                         setShowAR(false);
-                        setNextNodeCoords(null);
+                        setNavData(null);
                     }}
                 />
             ) : (
-                <Chatbot
-                    setShowAR={setShowAR}
-                    setNextNodeCoords={setNextNodeCoords}
-                />
+                <Chatbot onNavigationStart={handleNavigationStart} />
             )}
         </div>
     );

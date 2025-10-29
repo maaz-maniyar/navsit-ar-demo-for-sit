@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { BASE_URL } from "../config";
 
-function Chatbot({ setShowAR, setNextNodeCoords }) {
+function Chatbot({ onNavigationStart }) {
     const [message, setMessage] = useState("");
     const [chatHistory, setChatHistory] = useState([
         {
@@ -11,7 +11,6 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
     ]);
     const [loading, setLoading] = useState(false);
 
-    // Get user GPS location
     const getLocation = () => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) reject("Geolocation not supported");
@@ -20,7 +19,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                     (pos) =>
                         resolve({
                             latitude: pos.coords.latitude,
-                            longitude: pos.coords.longitude,
+                            longitude: pos.coords.longitude
                         }),
                     (err) => reject(err)
                 );
@@ -38,42 +37,39 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
 
         try {
             const coords = await getLocation().catch(() => null);
-            const res = await fetch(`${BASE_URL}/chat`, {
+            const res = await fetch(`${BASE_URL}/api/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     message: userMessage,
                     latitude: coords?.latitude,
-                    longitude: coords?.longitude,
-                }),
+                    longitude: coords?.longitude
+                })
             });
 
             if (!res.ok) throw new Error("Backend error");
             const data = await res.json();
+            const botReply = data.reply || "I'm not sure how to respond.";
 
-            // If backend returns navigation data (next node + coordinates)
-            if (data.nextNode && data.coordinates) {
-                setChatHistory((prev) => [
-                    ...prev,
-                    { sender: "bot", text: data.reply || `Navigating to ${data.nextNode}...` },
-                ]);
+            // Add bot reply
+            setChatHistory((prev) => [...prev, { sender: "bot", text: botReply }]);
 
-                // Pass next node coordinates to AR view
-                setNextNodeCoords(data.coordinates);
+            // If backend returned path & coordinates => start navigation
+            if (Array.isArray(data.coordinates) && data.coordinates.length > 1) {
+                // The backend returns coordinates as [[lat,lng], [lat,lng], ...]
+                const [lat, lng] = data.coordinates[1]; // pick the next node after user's current node
+                const nextCoords = { lat, lng };
+                const payload = {
+                    nextCoords,
+                    path: data.path || null,
+                    nextNode: data.nextNode || null,
+                    reply: botReply
+                };
 
-                // Give React state a moment to update, then switch to AR mode
+                // Give state a moment then switch to AR mode via callback from App
                 setTimeout(() => {
-                    console.log("Switching to AR mode with coords:", data.coordinates);
-                    setShowAR(true);
+                    if (typeof onNavigationStart === "function") onNavigationStart(payload);
                 }, 300);
-            } else if (data.reply) {
-                // Normal Q&A reply
-                setChatHistory((prev) => [...prev, { sender: "bot", text: data.reply }]);
-            } else {
-                setChatHistory((prev) => [
-                    ...prev,
-                    { sender: "bot", text: "I'm not sure how to respond to that." },
-                ]);
             }
         } catch (err) {
             console.error(err);
@@ -81,8 +77,8 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 ...prev,
                 {
                     sender: "bot",
-                    text: "Oops! Couldn't reach the server. Please try again.",
-                },
+                    text: "Oops! Couldn't reach the server. Please try again."
+                }
             ]);
         } finally {
             setLoading(false);
@@ -99,7 +95,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 color: "white",
                 fontFamily: "Poppins, sans-serif",
                 padding: "1rem",
-                position: "relative",
+                position: "relative"
             }}
         >
             {/* Header */}
@@ -108,7 +104,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    marginBottom: "1rem",
+                    marginBottom: "1rem"
                 }}
             >
                 <h2 style={{ color: "#4CAF50", margin: 0 }}>NavSIT</h2>
@@ -120,7 +116,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                         width: "45px",
                         borderRadius: "8px",
                         objectFit: "cover",
-                        boxShadow: "0 0 10px rgba(0,0,0,0.4)",
+                        boxShadow: "0 0 10px rgba(0,0,0,0.4)"
                     }}
                 />
             </div>
@@ -133,7 +129,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                     borderRadius: "10px",
                     padding: "1rem",
                     background: "rgba(255,255,255,0.05)",
-                    boxShadow: "0 0 10px rgba(0,0,0,0.3)",
+                    boxShadow: "0 0 10px rgba(0,0,0,0.3)"
                 }}
             >
                 {chatHistory.map((msg, idx) => (
@@ -141,7 +137,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                         key={idx}
                         style={{
                             textAlign: msg.sender === "user" ? "right" : "left",
-                            margin: "0.5rem 0",
+                            margin: "0.5rem 0"
                         }}
                     >
             <span
@@ -152,6 +148,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                     borderRadius: "15px",
                     maxWidth: "70%",
                     color: "white",
+                    wordWrap: "break-word"
                 }}
             >
               {msg.text}
@@ -175,7 +172,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                         border: "none",
                         outline: "none",
                         background: "#222",
-                        color: "white",
+                        color: "white"
                     }}
                 />
                 <button
@@ -187,7 +184,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                         background: "#4CAF50",
                         color: "white",
                         border: "none",
-                        cursor: "pointer",
+                        cursor: "pointer"
                     }}
                     disabled={loading}
                 >
