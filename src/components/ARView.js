@@ -6,7 +6,7 @@ const ARView = ({ onBack }) => {
     const mountRef = useRef(null);
 
     useEffect(() => {
-        let renderer, camera, scene, video, videoTexture, arrow;
+        let renderer, camera, scene, video, videoTexture, videoMesh, arrow;
 
         // === VIDEO SETUP ===
         video = document.createElement("video");
@@ -34,16 +34,39 @@ const ARView = ({ onBack }) => {
 
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(0x000000, 0); // transparent background
+        renderer.setClearColor(0x000000, 0);
         mountRef.current.appendChild(renderer.domElement);
 
-        // === VIDEO BACKGROUND ===
+        // === VIDEO BACKGROUND (Dynamic Aspect Ratio) ===
         videoTexture = new THREE.VideoTexture(video);
-        const videoGeometry = new THREE.PlaneGeometry(16, 9);
         const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
-        const videoMesh = new THREE.Mesh(videoGeometry, videoMaterial);
-        videoMesh.position.z = -10;
-        scene.add(videoMesh);
+
+        const updateVideoPlane = () => {
+            if (video.videoWidth && video.videoHeight) {
+                const videoAspect = video.videoWidth / video.videoHeight;
+                const screenAspect = window.innerWidth / window.innerHeight;
+
+                let geometry;
+                if (videoAspect > screenAspect) {
+                    geometry = new THREE.PlaneGeometry(16 * videoAspect, 16);
+                } else {
+                    geometry = new THREE.PlaneGeometry(16, 16 / videoAspect);
+                }
+
+                if (videoMesh) scene.remove(videoMesh);
+                videoMesh = new THREE.Mesh(geometry, videoMaterial);
+                videoMesh.position.z = -10;
+                scene.add(videoMesh);
+            }
+        };
+
+        video.addEventListener("loadedmetadata", updateVideoPlane);
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            updateVideoPlane();
+        });
 
         // === LIGHTS ===
         const ambient = new THREE.AmbientLight(0xffffff, 2);
@@ -65,9 +88,9 @@ const ARView = ({ onBack }) => {
             "/RedArrow.glb",
             (gltf) => {
                 arrow = gltf.scene;
-                arrow.scale.set(1.5, 1.5, 1.5); // make it large enough
-                arrow.rotation.x = -Math.PI / 4; // tilt slightly forward
-                arrow.position.set(0, -0.2, -2); // put just in front of cube
+                arrow.scale.set(1.5, 1.5, 1.5);
+                arrow.rotation.x = -Math.PI / 4;
+                arrow.position.set(0, -0.2, -2);
                 scene.add(arrow);
                 console.log("✅ Arrow model loaded and added to scene:", arrow);
             },
@@ -87,7 +110,7 @@ const ARView = ({ onBack }) => {
         const animate = () => {
             requestAnimationFrame(animate);
             cube.rotation.y += 0.01;
-            if (arrow) arrow.rotation.y += 0.005; // slow rotation for visibility
+            if (arrow) arrow.rotation.y += 0.005;
             renderer.render(scene, camera);
         };
         animate();
@@ -97,6 +120,7 @@ const ARView = ({ onBack }) => {
             if (mountRef.current?.firstChild)
                 mountRef.current.removeChild(mountRef.current.firstChild);
             if (video.srcObject) video.srcObject.getTracks().forEach((t) => t.stop());
+            window.removeEventListener("resize", updateVideoPlane);
         };
     }, []);
 
