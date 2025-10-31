@@ -2,15 +2,17 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-const SIT_FRONT_GATE = {
-    lat: 13.331624095990712,
-    lon: 77.12728232145311,
-};
+const BACKEND_URL = "https://navsit-backend-production.up.railway.app";
 
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
-    const [debug, setDebug] = useState({ heading: 0, bearing: 0, relative: 0 });
+    const [debug, setDebug] = useState({
+        heading: 0,
+        bearing: 0,
+        relative: 0,
+        nextNode: "",
+    });
 
     useEffect(() => {
         let scene, camera, renderer, watchId;
@@ -43,7 +45,7 @@ const ARView = ({ onBack }) => {
         scene.add(arrowGroup);
         arrowGroupRef.current = arrowGroup;
 
-        // === Load Arrow ===
+        // === Load Arrow Model ===
         loader.load(
             "/RedArrow.glb",
             (gltf) => {
@@ -78,9 +80,9 @@ const ARView = ({ onBack }) => {
             .then((stream) => (video.srcObject = stream))
             .catch((err) => console.error("Camera error:", err));
 
-        // === Bearing Calculator ===
+        // === Helpers ===
         const toRad = (deg) => (deg * Math.PI) / 180;
-        function calculateBearing(lat1, lon1, lat2, lon2) {
+        const calculateBearing = (lat1, lon1, lat2, lon2) => {
             const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
             const x =
                 Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
@@ -89,13 +91,16 @@ const ARView = ({ onBack }) => {
                 Math.cos(toRad(lon2 - lon1));
             const brng = Math.atan2(y, x);
             return ((brng * 180) / Math.PI + 360) % 360;
-        }
+        };
 
-        // === Tracking ===
+        // === Live Data ===
         let deviceHeading = 0;
         let targetBearing = 0;
-        let bearingOffset = -90; // 🔧 manual offset (try 0, 90, 180, -90)
+        let bearingOffset = -90;
+        let targetCoords = null;
+        let lastUpdateTime = 0;
 
+        // === Device Orientation ===
         window.addEventListener("deviceorientation", (event) => {
             if (event.webkitCompassHeading !== undefined) {
                 deviceHeading = event.webkitCompassHeading; // iOS
@@ -104,43 +109,77 @@ const ARView = ({ onBack }) => {
             }
         });
 
+        // === GPS + Backend Updates ===
+        async function fetchNextNode(lat, lon) {
+            try {
+                const res = await fetch(`${BACKEND_URL}/api/chat/update-node`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ latitude: lat, longitude: lon }),
+                });
+                const data = await res.json();
+                if (data?.nextCoordinates) {
+                    targetCoords = {
+                        lat: data.nextCoordinates[0],
+                        lon: data.nextCoordinates[1],
+                    };
+                    setDebug((d) => ({ ...d, nextNode: data.nextNode || "Unknown" }));
+                }
+            } catch (err) {
+                console.error("❌ Update-node error:", err);
+            }
+        }
+
         if (navigator.geolocation) {
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { latitude, longitude } = pos.coords;
-                    targetBearing = calculateBearing(
-                        latitude,
-                        longitude,
-                        SIT_FRONT_GATE.lat,
-                        SIT_FRONT_GATE.lon
-                    );
+
+                    // Fetch new target every 5 seconds max
+                    const now = Date.now();
+                    if (now - lastUpdateTime > 5000) {
+                        lastUpdateTime = now;
+                        fetchNextNode(latitude, longitude);
+                    }
+
+                    // If target available, compute bearing
+                    if (targetCoords) {
+                        targetBearing = calculateBearing(
+                            latitude,
+                            longitude,
+                            targetCoords.lat,
+                            targetCoords.lon
+                        );
+                    }
                 },
                 (err) => console.error("GPS error:", err),
                 { enableHighAccuracy: true }
             );
         }
 
-        // === Animate ===
+        // === Animation Loop ===
         const animate = () => {
             requestAnimationFrame(animate);
 
             if (arrowGroupRef.current) {
                 let relative = (targetBearing - deviceHeading + bearingOffset + 360) % 360;
                 const targetY = THREE.MathUtils.degToRad(relative);
-                arrowGroupRef.current.rotation.y += (targetY - arrowGroupRef.current.rotation.y) * 0.15;
+                arrowGroupRef.current.rotation.y +=
+                    (targetY - arrowGroupRef.current.rotation.y) * 0.15;
 
-                setDebug({
+                setDebug((d) => ({
+                    ...d,
                     heading: deviceHeading.toFixed(1),
                     bearing: targetBearing.toFixed(1),
                     relative: relative.toFixed(1),
-                });
+                }));
             }
 
             renderer.render(scene, camera);
         };
         animate();
 
-        // === Resize ===
+        // === Handle Resize ===
         const onResize = () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -180,7 +219,7 @@ const ARView = ({ onBack }) => {
                 Back
             </button>
 
-            {/* === Debug Overlay === */}
+            {/* === Debug Info === */}
             <div
                 style={{
                     position: "absolute",
@@ -198,6 +237,7 @@ const ARView = ({ onBack }) => {
                 <div>Heading: {debug.heading}°</div>
                 <div>Bearing: {debug.bearing}°</div>
                 <div>Relative: {debug.relative}°</div>
+                <div>Next: {debug.nextNode}</div>
             </div>
         </>
     );
