@@ -14,6 +14,12 @@ const ARView = ({ onBack }) => {
         nextNode: "",
     });
 
+    const [bearingOffset, setBearingOffset] = useState(() => {
+        // Load saved offset from localStorage (if available)
+        const saved = localStorage.getItem("arrowOffset");
+        return saved ? parseFloat(saved) : -90;
+    });
+
     useEffect(() => {
         let scene, camera, renderer, watchId;
         const loader = new GLTFLoader();
@@ -96,7 +102,6 @@ const ARView = ({ onBack }) => {
         // === Live Data ===
         let deviceHeading = 0;
         let targetBearing = 0;
-        let bearingOffset = -90;
         let targetCoords = null;
         let lastUpdateTime = 0;
 
@@ -162,7 +167,7 @@ const ARView = ({ onBack }) => {
             requestAnimationFrame(animate);
 
             if (arrowGroupRef.current) {
-                let relative = (targetBearing - deviceHeading + bearingOffset + 360) % 360;
+                const relative = (targetBearing - deviceHeading + bearingOffset + 360) % 360;
                 const targetY = THREE.MathUtils.degToRad(relative);
                 arrowGroupRef.current.rotation.y +=
                     (targetY - arrowGroupRef.current.rotation.y) * 0.15;
@@ -179,22 +184,18 @@ const ARView = ({ onBack }) => {
         };
         animate();
 
-        // === Handle Resize ===
-        const onResize = () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        };
-        window.addEventListener("resize", onResize);
-
         // === Cleanup ===
         return () => {
             if (watchId) navigator.geolocation.clearWatch(watchId);
-            window.removeEventListener("resize", onResize);
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
         };
-    }, []);
+    }, [bearingOffset]);
+
+    // === Persist offset changes ===
+    useEffect(() => {
+        localStorage.setItem("arrowOffset", bearingOffset);
+    }, [bearingOffset]);
 
     return (
         <>
@@ -223,7 +224,7 @@ const ARView = ({ onBack }) => {
             <div
                 style={{
                     position: "absolute",
-                    bottom: 20,
+                    bottom: 90,
                     left: 20,
                     zIndex: 10,
                     background: "rgba(0,0,0,0.5)",
@@ -238,6 +239,36 @@ const ARView = ({ onBack }) => {
                 <div>Bearing: {debug.bearing}°</div>
                 <div>Relative: {debug.relative}°</div>
                 <div>Next: {debug.nextNode}</div>
+                <div>Offset: {bearingOffset}°</div>
+            </div>
+
+            {/* === Offset Slider === */}
+            <div
+                style={{
+                    position: "absolute",
+                    bottom: 20,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: "80%",
+                    zIndex: 10,
+                    textAlign: "center",
+                    color: "white",
+                }}
+            >
+                <label>Adjust Arrow Offset ({bearingOffset}°)</label>
+                <input
+                    type="range"
+                    min="-180"
+                    max="180"
+                    step="1"
+                    value={bearingOffset}
+                    onChange={(e) => setBearingOffset(parseFloat(e.target.value))}
+                    style={{
+                        width: "100%",
+                        marginTop: "8px",
+                        accentColor: "#4CAF50",
+                    }}
+                />
             </div>
         </>
     );
