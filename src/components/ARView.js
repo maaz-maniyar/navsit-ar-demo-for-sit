@@ -7,6 +7,7 @@ const BACKEND_URL = "https://navsit-backend-production.up.railway.app";
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
+
     const [debug, setDebug] = useState({
         heading: 0,
         bearing: 0,
@@ -15,7 +16,6 @@ const ARView = ({ onBack }) => {
     });
 
     const [bearingOffset, setBearingOffset] = useState(() => {
-        // Load saved offset from localStorage (if available)
         const saved = localStorage.getItem("arrowOffset");
         return saved ? parseFloat(saved) : -90;
     });
@@ -24,7 +24,7 @@ const ARView = ({ onBack }) => {
         let scene, camera, renderer, watchId;
         const loader = new GLTFLoader();
 
-        // === Scene, Camera, Renderer ===
+        // === Scene Setup ===
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(
             70,
@@ -105,7 +105,7 @@ const ARView = ({ onBack }) => {
         let targetCoords = null;
         let lastUpdateTime = 0;
 
-        // === Device Orientation ===
+        // === Orientation ===
         window.addEventListener("deviceorientation", (event) => {
             if (event.webkitCompassHeading !== undefined) {
                 deviceHeading = event.webkitCompassHeading; // iOS
@@ -114,7 +114,7 @@ const ARView = ({ onBack }) => {
             }
         });
 
-        // === GPS + Backend Updates ===
+        // === Backend Updates ===
         async function fetchNextNode(lat, lon) {
             try {
                 const res = await fetch(`${BACKEND_URL}/api/chat/update-node`, {
@@ -139,15 +139,12 @@ const ARView = ({ onBack }) => {
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     const { latitude, longitude } = pos.coords;
-
-                    // Fetch new target every 5 seconds max
                     const now = Date.now();
                     if (now - lastUpdateTime > 5000) {
                         lastUpdateTime = now;
                         fetchNextNode(latitude, longitude);
                     }
 
-                    // If target available, compute bearing
                     if (targetCoords) {
                         targetBearing = calculateBearing(
                             latitude,
@@ -190,9 +187,9 @@ const ARView = ({ onBack }) => {
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
         };
-    }, [bearingOffset]);
+    }, []); // ⚠️ No bearingOffset dependency — scene only initializes once
 
-    // === Persist offset changes ===
+    // Persist offset changes
     useEffect(() => {
         localStorage.setItem("arrowOffset", bearingOffset);
     }, [bearingOffset]);
@@ -220,7 +217,7 @@ const ARView = ({ onBack }) => {
                 Back
             </button>
 
-            {/* === Debug Info === */}
+            {/* Debug Info */}
             <div
                 style={{
                     position: "absolute",
@@ -242,7 +239,7 @@ const ARView = ({ onBack }) => {
                 <div>Offset: {bearingOffset}°</div>
             </div>
 
-            {/* === Offset Slider === */}
+            {/* Offset Slider */}
             <div
                 style={{
                     position: "absolute",
