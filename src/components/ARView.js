@@ -8,17 +8,25 @@ const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
 
+    // ✅ useRef for real-time offset access
+    const bearingOffsetRef = useRef(-90);
+
     const [debug, setDebug] = useState({
         heading: 0,
         bearing: 0,
         relative: 0,
         nextNode: "",
+        offset: -90,
     });
 
-    const [bearingOffset, setBearingOffset] = useState(() => {
+    // Load saved offset
+    useEffect(() => {
         const saved = localStorage.getItem("arrowOffset");
-        return saved ? parseFloat(saved) : -90;
-    });
+        if (saved) {
+            bearingOffsetRef.current = parseFloat(saved);
+            setDebug((d) => ({ ...d, offset: parseFloat(saved) }));
+        }
+    }, []);
 
     useEffect(() => {
         let scene, camera, renderer, watchId;
@@ -164,7 +172,8 @@ const ARView = ({ onBack }) => {
             requestAnimationFrame(animate);
 
             if (arrowGroupRef.current) {
-                const relative = (targetBearing - deviceHeading + bearingOffset + 360) % 360;
+                const offset = bearingOffsetRef.current; // ✅ always current value
+                const relative = (targetBearing - deviceHeading + offset + 360) % 360;
                 const targetY = THREE.MathUtils.degToRad(relative);
                 arrowGroupRef.current.rotation.y +=
                     (targetY - arrowGroupRef.current.rotation.y) * 0.15;
@@ -174,6 +183,7 @@ const ARView = ({ onBack }) => {
                     heading: deviceHeading.toFixed(1),
                     bearing: targetBearing.toFixed(1),
                     relative: relative.toFixed(1),
+                    offset: offset.toFixed(1),
                 }));
             }
 
@@ -187,12 +197,14 @@ const ARView = ({ onBack }) => {
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
         };
-    }, []); // ⚠️ No bearingOffset dependency — scene only initializes once
+    }, []);
 
-    // Persist offset changes
-    useEffect(() => {
-        localStorage.setItem("arrowOffset", bearingOffset);
-    }, [bearingOffset]);
+    // === Slider Handler ===
+    const handleOffsetChange = (value) => {
+        bearingOffsetRef.current = value;
+        localStorage.setItem("arrowOffset", value);
+        setDebug((d) => ({ ...d, offset: value }));
+    };
 
     return (
         <>
@@ -200,6 +212,7 @@ const ARView = ({ onBack }) => {
                 ref={containerRef}
                 style={{ width: "100vw", height: "100vh", overflow: "hidden" }}
             />
+
             <button
                 onClick={onBack}
                 style={{
@@ -236,7 +249,7 @@ const ARView = ({ onBack }) => {
                 <div>Bearing: {debug.bearing}°</div>
                 <div>Relative: {debug.relative}°</div>
                 <div>Next: {debug.nextNode}</div>
-                <div>Offset: {bearingOffset}°</div>
+                <div>Offset: {debug.offset}°</div>
             </div>
 
             {/* Offset Slider */}
@@ -252,14 +265,14 @@ const ARView = ({ onBack }) => {
                     color: "white",
                 }}
             >
-                <label>Adjust Arrow Offset ({bearingOffset}°)</label>
+                <label>Adjust Arrow Offset ({debug.offset}°)</label>
                 <input
                     type="range"
                     min="-180"
                     max="180"
                     step="1"
-                    value={bearingOffset}
-                    onChange={(e) => setBearingOffset(parseFloat(e.target.value))}
+                    value={debug.offset}
+                    onChange={(e) => handleOffsetChange(parseFloat(e.target.value))}
                     style={{
                         width: "100%",
                         marginTop: "8px",
