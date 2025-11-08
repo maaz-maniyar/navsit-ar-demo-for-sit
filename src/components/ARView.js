@@ -9,7 +9,7 @@ const ARView = ({ onBack }) => {
     const arrowGroupRef = useRef(null);
 
     // ✅ useRef for real-time offset access
-    const bearingOffsetRef = useRef(-90);
+    const bearingOffsetRef = useRef(-7);
 
     const [debug, setDebug] = useState({
         heading: 0,
