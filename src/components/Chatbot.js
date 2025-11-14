@@ -6,9 +6,10 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
     const [chatHistory, setChatHistory] = useState([
         {
             sender: "bot",
-            text: "Hi! I can help you navigate or answer questions. Where would you like to go or what would you like to ask?"
-        }
+            text: "Hi! I can help you navigate or answer questions. Where would you like to go or what would you like to ask?",
+        },
     ]);
+
     const [loading, setLoading] = useState(false);
 
     const [pendingNavigation, setPendingNavigation] = useState(null);
@@ -29,16 +30,34 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
         });
     };
 
-    const extractEntity = (msg) => {
-        const lower = msg.toLowerCase();
-        if (lower.includes("ece")) return "ECE Block";
-        if (lower.includes("cse")) return "CSE Department";
-        if (lower.includes("front gate")) return "SIT Front Gate";
-        if (lower.includes("mba")) return "MBA Block";
-        if (lower.includes("civil")) return "Civil Department";
-        if (lower.includes("library")) return "SIT Library";
-        if (lower.includes("canteen")) return "SIT Canteen";
-        return null;
+    const startNavigation = async () => {
+        if (!pendingNavigation?.entity) return;
+
+        const entity = pendingNavigation.entity;
+
+        // Build a proper NLP-friendly sentence
+        const navigationQuery = `navigate to ${entity}`;
+
+        const coords = await getLocation().catch(() => null);
+
+        const res = await fetch(`${BASE_URL}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: navigationQuery,
+                latitude: coords?.latitude,
+                longitude: coords?.longitude,
+            }),
+        });
+
+        const data = await res.json();
+
+        if (data.nextNode && data.coordinates) {
+            setNextNodeCoords(data.coordinates);
+            setShowAR(true);
+        }
+
+        setPendingNavigation(null);
     };
 
     const handleSend = async () => {
@@ -62,58 +81,50 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 }),
             });
 
-            if (!res.ok) throw new Error("Backend error");
             const data = await res.json();
 
-            setChatHistory((prev) => [...prev, { sender: "bot", text: data.reply }]);
+            if (data.reply && !data.nextNode && !data.coordinates) {
+                setChatHistory((prev) => [
+                    ...prev,
+                    { sender: "bot", text: data.reply },
+                ]);
 
-            const replyLower = data.reply.toLowerCase();
-            if (replyLower.includes("tap navigate") || replyLower.includes("start the ar")) {
-                const entity = extractEntity(userMessage);
-                if (entity) {
-                    setPendingNavigation({ entity });
+                if (data.entity) {
+                    setPendingNavigation({ entity: data.entity });
                 }
+
+                setLoading(false);
+                return;
             }
 
             if (data.nextNode && data.coordinates) {
-                setNextNodeCoords(data.coordinates);
-                setShowAR(true);
-            }
+                setChatHistory((prev) => [
+                    ...prev,
+                    { sender: "bot", text: data.reply || "Starting navigation..." },
+                ]);
 
+                setNextNodeCoords(data.coordinates);
+                setTimeout(() => {
+                    setShowAR(true);
+                }, 300);
+
+                setPendingNavigation(null);
+            } else {
+                // General responses
+                setChatHistory((prev) => [
+                    ...prev,
+                    { sender: "bot", text: data.reply },
+                ]);
+            }
         } catch (err) {
-            console.error(err);
+            console.error("Chat error:", err);
             setChatHistory((prev) => [
                 ...prev,
-                { sender: "bot", text: "Oops! Couldn't reach the server. Try again." },
+                { sender: "bot", text: "Oops! Couldn't reach the server. Try again!" },
             ]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const startNavigation = async () => {
-        if (!pendingNavigation?.entity) return;
-
-        const coords = await getLocation().catch(() => null);
-
-        const res = await fetch(`${BASE_URL}/chat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: pendingNavigation.entity,
-                latitude: coords?.latitude,
-                longitude: coords?.longitude,
-            }),
-        });
-
-        const data = await res.json();
-
-        if (data.nextNode && data.coordinates) {
-            setNextNodeCoords(data.coordinates);
-            setShowAR(true);
         }
 
-        setPendingNavigation(null);
+        setLoading(false);
     };
 
     return (
@@ -129,6 +140,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 position: "relative",
             }}
         >
+            {/* Header */}
             <div
                 style={{
                     display: "flex",
@@ -186,23 +198,23 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 {loading && <p style={{ opacity: 0.6 }}>Thinking...</p>}
             </div>
 
+            {/* Start Navigation Button */}
             {pendingNavigation && (
-                <div style={{ textAlign: "center", marginBottom: "1rem" }}>
-                    <button
-                        onClick={startNavigation}
-                        style={{
-                            padding: "0.8rem 1.5rem",
-                            background: "#4CAF50",
-                            color: "white",
-                            borderRadius: "10px",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: "16px",
-                        }}
-                    >
-                        Start Navigation
-                    </button>
-                </div>
+                <button
+                    onClick={startNavigation}
+                    style={{
+                        width: "100%",
+                        padding: "1rem",
+                        background: "#4CAF50",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "12px",
+                        marginTop: "1rem",
+                        fontSize: "1rem",
+                    }}
+                >
+                    Start Navigation
+                </button>
             )}
 
             {/* Input */}
@@ -224,6 +236,7 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                 />
                 <button
                     onClick={handleSend}
+                    disabled={loading}
                     style={{
                         marginLeft: "0.5rem",
                         padding: "0.8rem 1.2rem",
@@ -233,7 +246,6 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                         border: "none",
                         cursor: "pointer",
                     }}
-                    disabled={loading}
                 >
                     {loading ? "..." : "Send"}
                 </button>
