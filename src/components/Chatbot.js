@@ -218,7 +218,17 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
             )}
 
             {/* Input */}
-            <div style={{ display: "flex", marginTop: "1rem" }}>
+            {/* Input Section */}
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    padding: "0.8rem 0",
+                    marginTop: "0.5rem",
+                    marginBottom: "1.5rem", // ⬅️ Lifts the whole input+button up
+                }}
+            >
                 <input
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -226,30 +236,33 @@ function Chatbot({ setShowAR, setNextNodeCoords }) {
                     placeholder="Type your message..."
                     style={{
                         flex: 1,
-                        padding: "0.8rem",
                         borderRadius: "20px",
-                        border: "none",
-                        outline: "none",
+                        padding: "0.8rem 1rem",
                         background: "#222",
                         color: "white",
+                        border: "1px solid #333",
+                        outline: "none",
                     }}
                 />
+
                 <button
                     onClick={handleSend}
                     disabled={loading}
                     style={{
-                        marginLeft: "0.5rem",
+                        border: "none",
                         padding: "0.8rem 1.2rem",
                         borderRadius: "20px",
                         background: "#4CAF50",
                         color: "white",
-                        border: "none",
-                        cursor: "pointer",
+                        cursor: loading ? "not-allowed" : "pointer",
+                        opacity: loading ? 0.6 : 1,
+                        transition: "0.2s",
                     }}
                 >
                     {loading ? "..." : "Send"}
                 </button>
             </div>
+
         </div>
     );
 }
