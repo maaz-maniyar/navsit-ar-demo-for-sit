@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-
-const BACKEND_URL = "https://navsit-backend-production.up.railway.app";
+import { BACKEND_ORIGIN } from "../config";
 
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
@@ -125,7 +124,7 @@ const ARView = ({ onBack }) => {
         // === Backend Updates ===
         async function fetchNextNode(lat, lon) {
             try {
-                const res = await fetch(`${BACKEND_URL}/api/chat/update-node`, {
+                const res = await fetch(`${BACKEND_ORIGIN}/api/chat/update-node`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ latitude: lat, longitude: lon }),

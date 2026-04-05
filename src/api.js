@@ -1,14 +1,25 @@
 import axios from "axios";
+import { BASE_URL } from "./config";
 
-const API_BASE = "http://localhost:8080/api";
-
-export const sendQuery = async (message) => {
-    // Send user query to backend to get intent & entity
-    const response = await axios.post(`${API_BASE}/query`, { message });
-    return response.data; // { intent: "navigate", entity: "ECE Block" }
+export const sendQuery = async (message, latitude = null, longitude = null) => {
+    const payload = { message };
+    if (latitude !== null && longitude !== null) {
+        payload.latitude = latitude;
+        payload.longitude = longitude;
+    }
+    const response = await axios.post(`${BASE_URL}/chat`, payload);
+    return response.data;
 };
 
 export const getPath = async (from, to) => {
-    const response = await axios.post(`${API_BASE}/navigate`, { from, to });
-    return response.data; // [[lat, lon], [lat, lon], ...]
+    const response = await axios.post(`${BASE_URL}/navigation/path`, {
+        source: from,
+        destination: to,
+    });
+    return response.data;
+};
+
+export const getNodes = async () => {
+    const response = await axios.get(`${BASE_URL}/nodes`);
+    return response.data;
 };
