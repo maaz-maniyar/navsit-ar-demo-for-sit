@@ -8,6 +8,7 @@ const POSITION_UPDATE_MS = 3000;
 const HEADING_SMOOTHING = 0.18;
 const ARROW_SMOOTHING = 0.2;
 const TURN_DEADBAND_DEG = 1.5;
+const ARROW_MODEL_YAW_CORRECTION_DEG = -7;
 
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
@@ -169,6 +170,7 @@ const ARView = ({ onBack }) => {
                 const arrow = gltf.scene;
                 arrow.scale.set(0.4, 0.4, 0.4);
                 arrow.rotation.x = -Math.PI / 4;
+                arrow.rotation.y = THREE.MathUtils.degToRad(ARROW_MODEL_YAW_CORRECTION_DEG);
                 arrow.position.set(0, -0.5, 0);
                 arrowGroup.add(arrow);
             },
