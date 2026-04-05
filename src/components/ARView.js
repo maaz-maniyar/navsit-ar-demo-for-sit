@@ -3,7 +3,6 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { BACKEND_ORIGIN } from "../config";
 
-const DEFAULT_OFFSET = -7;
 const DEBUG_UPDATE_MS = 200;
 const POSITION_UPDATE_MS = 3000;
 const HEADING_SMOOTHING = 0.18;
@@ -13,26 +12,13 @@ const TURN_DEADBAND_DEG = 1.5;
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
-    const bearingOffsetRef = useRef(DEFAULT_OFFSET);
 
     const [debug, setDebug] = useState({
         heading: 0,
         bearing: 0,
         relative: 0,
         nextNode: "",
-        offset: DEFAULT_OFFSET,
     });
-
-    useEffect(() => {
-        const saved = localStorage.getItem("arrowOffset");
-        if (saved) {
-            const parsed = parseFloat(saved);
-            if (Number.isFinite(parsed)) {
-                bearingOffsetRef.current = parsed;
-                setDebug((current) => ({ ...current, offset: parsed }));
-            }
-        }
-    }, []);
 
     useEffect(() => {
         let scene;
@@ -293,9 +279,8 @@ const ARView = ({ onBack }) => {
                               HEADING_SMOOTHING
                           );
 
-                const offset = bearingOffsetRef.current;
                 const heading = smoothedHeadingRef.current;
-                const relative = normalizeDegrees(targetBearingRef.current - heading + offset);
+                const relative = normalizeDegrees(targetBearingRef.current - heading);
                 const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
                 const delta = shortestAngleDelta(currentY, relative);
                 const appliedDelta = Math.abs(delta) < TURN_DEADBAND_DEG ? 0 : delta * ARROW_SMOOTHING;
@@ -309,7 +294,6 @@ const ARView = ({ onBack }) => {
                         heading: heading.toFixed(1),
                         bearing: targetBearingRef.current.toFixed(1),
                         relative: relative.toFixed(1),
-                        offset: offset.toFixed(1),
                     }));
                 }
             }
@@ -335,12 +319,6 @@ const ARView = ({ onBack }) => {
             document.querySelectorAll("video").forEach((element) => element.remove());
         };
     }, []);
-
-    const handleOffsetChange = (value) => {
-        bearingOffsetRef.current = value;
-        localStorage.setItem("arrowOffset", value);
-        setDebug((current) => ({ ...current, offset: value }));
-    };
 
     return (
         <>
@@ -384,35 +362,6 @@ const ARView = ({ onBack }) => {
                 <div>Bearing: {debug.bearing}°</div>
                 <div>Relative: {debug.relative}°</div>
                 <div>Next: {debug.nextNode}</div>
-                <div>Offset: {debug.offset}°</div>
-            </div>
-
-            <div
-                style={{
-                    position: "absolute",
-                    bottom: 20,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "80%",
-                    zIndex: 10,
-                    textAlign: "center",
-                    color: "white",
-                }}
-            >
-                <label>Adjust Arrow Offset ({debug.offset}°)</label>
-                <input
-                    type="range"
-                    min="-180"
-                    max="180"
-                    step="1"
-                    value={debug.offset}
-                    onChange={(event) => handleOffsetChange(parseFloat(event.target.value))}
-                    style={{
-                        width: "100%",
-                        marginTop: "8px",
-                        accentColor: "#4CAF50",
-                    }}
-                />
             </div>
         </>
     );
