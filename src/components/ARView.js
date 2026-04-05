@@ -5,11 +5,14 @@ import { BACKEND_ORIGIN } from "../config";
 
 const DEFAULT_OFFSET = -7;
 const DEBUG_UPDATE_MS = 200;
+const POSITION_UPDATE_MS = 3000;
+const HEADING_SMOOTHING = 0.18;
+const ARROW_SMOOTHING = 0.2;
+const TURN_DEADBAND_DEG = 1.5;
 
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
-
     const bearingOffsetRef = useRef(DEFAULT_OFFSET);
 
     const [debug, setDebug] = useState({
@@ -20,30 +23,94 @@ const ARView = ({ onBack }) => {
         offset: DEFAULT_OFFSET,
     });
 
-    // Load saved offset
     useEffect(() => {
         const saved = localStorage.getItem("arrowOffset");
         if (saved) {
-            bearingOffsetRef.current = parseFloat(saved);
-            setDebug((d) => ({ ...d, offset: parseFloat(saved) }));
+            const parsed = parseFloat(saved);
+            if (Number.isFinite(parsed)) {
+                bearingOffsetRef.current = parsed;
+                setDebug((current) => ({ ...current, offset: parsed }));
+            }
         }
     }, []);
 
     useEffect(() => {
-        let scene, camera, renderer, watchId;
-        const loader = new GLTFLoader();
+        let scene;
+        let camera;
+        let renderer;
+        let watchId;
         let animationFrameId;
         let lastDebugUpdate = 0;
-        let orientationEventName = "deviceorientation";
+        const loader = new GLTFLoader();
+        const orientationListeners = [];
+        const deviceHeadingRef = { current: null };
+        const smoothedHeadingRef = { current: null };
+        const targetBearingRef = { current: 0 };
+        const targetCoordsRef = { current: null };
+        const lastUpdateTimeRef = { current: 0 };
 
-        // === Scene Setup ===
+        const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
+        const toRad = (deg) => (deg * Math.PI) / 180;
+        const shortestAngleDelta = (fromDeg, toDeg) => ((toDeg - fromDeg + 540) % 360) - 180;
+        const smoothAngle = (currentDeg, targetDeg, factor) =>
+            normalizeDegrees(currentDeg + shortestAngleDelta(currentDeg, targetDeg) * factor);
+
+        const calculateBearing = (lat1, lon1, lat2, lon2) => {
+            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+            const x =
+                Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) *
+                    Math.cos(toRad(lat2)) *
+                    Math.cos(toRad(lon2 - lon1));
+            const bearing = Math.atan2(y, x);
+            return normalizeDegrees((bearing * 180) / Math.PI);
+        };
+
+        const getScreenAngle = () => {
+            if (window.screen?.orientation && typeof window.screen.orientation.angle === "number") {
+                return window.screen.orientation.angle;
+            }
+            if (typeof window.orientation === "number") {
+                return window.orientation;
+            }
+            return 0;
+        };
+
+        const getHeading = (event) => {
+            if (typeof event.webkitCompassHeading === "number") {
+                if (
+                    typeof event.webkitCompassAccuracy === "number" &&
+                    event.webkitCompassAccuracy >= 0 &&
+                    event.webkitCompassAccuracy > 35
+                ) {
+                    return null;
+                }
+                return normalizeDegrees(event.webkitCompassHeading);
+            }
+
+            if (event.alpha === null) {
+                return null;
+            }
+
+            return normalizeDegrees(360 - event.alpha + getScreenAngle());
+        };
+
+        const updateTargetBearing = (latitude, longitude) => {
+            const targetCoords = targetCoordsRef.current;
+            if (!targetCoords) {
+                return;
+            }
+
+            targetBearingRef.current = calculateBearing(
+                latitude,
+                longitude,
+                targetCoords.lat,
+                targetCoords.lon
+            );
+        };
+
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(
-            70,
-            window.innerWidth / window.innerHeight,
-            0.1,
-            1000
-        );
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 1.6, 0);
 
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
@@ -51,19 +118,16 @@ const ARView = ({ onBack }) => {
         renderer.setPixelRatio(window.devicePixelRatio);
         containerRef.current.appendChild(renderer.domElement);
 
-        // === Lighting ===
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-        dirLight.position.set(0, 5, 5);
-        scene.add(dirLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+        directionalLight.position.set(0, 5, 5);
+        scene.add(directionalLight);
 
-        // === Arrow Group ===
         const arrowGroup = new THREE.Group();
         arrowGroup.position.set(0, 0, -3);
         scene.add(arrowGroup);
         arrowGroupRef.current = arrowGroup;
 
-        // === Load Arrow Model ===
         loader.load(
             "/RedArrow.glb",
             (gltf) => {
@@ -72,13 +136,11 @@ const ARView = ({ onBack }) => {
                 arrow.rotation.x = -Math.PI / 4;
                 arrow.position.set(0, -0.5, 0);
                 arrowGroup.add(arrow);
-                console.log("✅ Arrow loaded");
             },
             undefined,
-            (err) => console.error("❌ Error loading arrow:", err)
+            (error) => console.error("Error loading arrow:", error)
         );
 
-        // === Camera Feed ===
         const video = document.createElement("video");
         video.setAttribute("autoplay", "");
         video.setAttribute("playsinline", "");
@@ -95,130 +157,95 @@ const ARView = ({ onBack }) => {
 
         navigator.mediaDevices
             .getUserMedia({ video: { facingMode: "environment" } })
-            .then((stream) => (video.srcObject = stream))
-            .catch((err) => console.error("Camera error:", err));
+            .then((stream) => {
+                video.srcObject = stream;
+            })
+            .catch((error) => console.error("Camera error:", error));
 
-        // === Helpers ===
-        const toRad = (deg) => (deg * Math.PI) / 180;
-        const calculateBearing = (lat1, lon1, lat2, lon2) => {
-            const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-            const x =
-                Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-                Math.sin(toRad(lat1)) *
-                Math.cos(toRad(lat2)) *
-                Math.cos(toRad(lon2 - lon1));
-            const brng = Math.atan2(y, x);
-            return ((brng * 180) / Math.PI + 360) % 360;
-        };
-        const getScreenAngle = () => {
-            if (window.screen?.orientation && typeof window.screen.orientation.angle === "number") {
-                return window.screen.orientation.angle;
-            }
-            if (typeof window.orientation === "number") {
-                return window.orientation;
-            }
-            return 0;
-        };
-        const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
-        const shortestAngleDelta = (fromDeg, toDeg) => {
-            return ((toDeg - fromDeg + 540) % 360) - 180;
-        };
-        const getHeading = (event) => {
-            if (typeof event.webkitCompassHeading === "number") {
-                return normalizeDegrees(event.webkitCompassHeading);
-            }
-
-            if (event.alpha === null) {
-                return null;
-            }
-
-            const screenAngle = getScreenAngle();
-            return normalizeDegrees(360 - event.alpha + screenAngle);
-        };
-
-        // === Live Data ===
-        let deviceHeading = null;
-        let targetBearing = 0;
-        let targetCoords = null;
-        let lastUpdateTime = 0;
-        let orientationHandler;
-
-        // === Orientation ===
-        orientationHandler = (event) => {
+        const orientationHandler = (event) => {
             const heading = getHeading(event);
-            if (heading !== null) {
-                deviceHeading = heading;
+            if (!Number.isFinite(heading)) {
+                return;
+            }
+
+            deviceHeadingRef.current = heading;
+            if (smoothedHeadingRef.current === null) {
+                smoothedHeadingRef.current = heading;
             }
         };
-        orientationEventName =
-            "ondeviceorientationabsolute" in window
-                ? "deviceorientationabsolute"
-                : "deviceorientation";
-        window.addEventListener(orientationEventName, orientationHandler, true);
 
-        // === Backend Updates ===
-        async function fetchNextNode(lat, lon) {
+        ["deviceorientationabsolute", "deviceorientation"].forEach((eventName) => {
+            window.addEventListener(eventName, orientationHandler, true);
+            orientationListeners.push(eventName);
+        });
+
+        const fetchNextNode = async (latitude, longitude) => {
             try {
-                const res = await fetch(`${BACKEND_ORIGIN}/api/chat/update-node`, {
+                const response = await fetch(`${BACKEND_ORIGIN}/api/chat/update-node`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ latitude: lat, longitude: lon }),
+                    body: JSON.stringify({ latitude, longitude }),
                 });
-                const data = await res.json();
+                const data = await response.json();
+
                 if (data?.nextCoordinates) {
-                    targetCoords = {
+                    targetCoordsRef.current = {
                         lat: data.nextCoordinates[0],
                         lon: data.nextCoordinates[1],
                     };
-                    setDebug((d) => ({ ...d, nextNode: data.nextNode || "Unknown" }));
+                    updateTargetBearing(latitude, longitude);
+                    setDebug((current) => ({ ...current, nextNode: data.nextNode || "Unknown" }));
                 }
-            } catch (err) {
-                console.error("❌ Update-node error:", err);
+            } catch (error) {
+                console.error("Update-node error:", error);
             }
-        }
+        };
 
         if (navigator.geolocation) {
             watchId = navigator.geolocation.watchPosition(
-                (pos) => {
-                    const { latitude, longitude } = pos.coords;
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    updateTargetBearing(latitude, longitude);
+
                     const now = Date.now();
-                    if (now - lastUpdateTime > 5000) {
-                        lastUpdateTime = now;
+                    if (now - lastUpdateTimeRef.current > POSITION_UPDATE_MS) {
+                        lastUpdateTimeRef.current = now;
                         fetchNextNode(latitude, longitude);
                     }
-
-                    if (targetCoords) {
-                        targetBearing = calculateBearing(
-                            latitude,
-                            longitude,
-                            targetCoords.lat,
-                            targetCoords.lon
-                        );
-                    }
                 },
-                (err) => console.error("GPS error:", err),
+                (error) => console.error("GPS error:", error),
                 { enableHighAccuracy: true }
             );
         }
 
-        // === Animation Loop ===
         const animate = () => {
             animationFrameId = requestAnimationFrame(animate);
 
-            if (arrowGroupRef.current && deviceHeading !== null) {
+            if (arrowGroupRef.current && deviceHeadingRef.current !== null) {
+                smoothedHeadingRef.current =
+                    smoothedHeadingRef.current === null
+                        ? deviceHeadingRef.current
+                        : smoothAngle(
+                              smoothedHeadingRef.current,
+                              deviceHeadingRef.current,
+                              HEADING_SMOOTHING
+                          );
+
                 const offset = bearingOffsetRef.current;
-                const relative = normalizeDegrees(targetBearing - deviceHeading + offset);
+                const heading = smoothedHeadingRef.current;
+                const relative = normalizeDegrees(targetBearingRef.current - heading + offset);
                 const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
                 const delta = shortestAngleDelta(currentY, relative);
-                arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(currentY + delta * 0.15);
+                const appliedDelta = Math.abs(delta) < TURN_DEADBAND_DEG ? 0 : delta * ARROW_SMOOTHING;
+                arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(currentY + appliedDelta);
 
                 const now = Date.now();
                 if (now - lastDebugUpdate >= DEBUG_UPDATE_MS) {
                     lastDebugUpdate = now;
-                    setDebug((d) => ({
-                        ...d,
-                        heading: deviceHeading.toFixed(1),
-                        bearing: targetBearing.toFixed(1),
+                    setDebug((current) => ({
+                        ...current,
+                        heading: heading.toFixed(1),
+                        bearing: targetBearingRef.current.toFixed(1),
                         relative: relative.toFixed(1),
                         offset: offset.toFixed(1),
                     }));
@@ -227,25 +254,30 @@ const ARView = ({ onBack }) => {
 
             renderer.render(scene, camera);
         };
+
         animate();
 
-        // === Cleanup ===
         return () => {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            if (watchId) navigator.geolocation.clearWatch(watchId);
-            if (orientationHandler) {
-                window.removeEventListener(orientationEventName, orientationHandler, true);
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
             }
-            if (renderer) renderer.dispose();
-            document.querySelectorAll("video").forEach((v) => v.remove());
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+            orientationListeners.forEach((eventName) => {
+                window.removeEventListener(eventName, orientationHandler, true);
+            });
+            if (renderer) {
+                renderer.dispose();
+            }
+            document.querySelectorAll("video").forEach((element) => element.remove());
         };
     }, []);
 
-    // === Slider Handler ===
     const handleOffsetChange = (value) => {
         bearingOffsetRef.current = value;
         localStorage.setItem("arrowOffset", value);
-        setDebug((d) => ({ ...d, offset: value }));
+        setDebug((current) => ({ ...current, offset: value }));
     };
 
     return (
@@ -272,7 +304,6 @@ const ARView = ({ onBack }) => {
                 Return to Chat
             </button>
 
-            {/* Debug Info */}
             <div
                 style={{
                     position: "absolute",
@@ -294,7 +325,6 @@ const ARView = ({ onBack }) => {
                 <div>Offset: {debug.offset}°</div>
             </div>
 
-            {/* Offset Slider */}
             <div
                 style={{
                     position: "absolute",
@@ -314,7 +344,7 @@ const ARView = ({ onBack }) => {
                     max="180"
                     step="1"
                     value={debug.offset}
-                    onChange={(e) => handleOffsetChange(parseFloat(e.target.value))}
+                    onChange={(event) => handleOffsetChange(parseFloat(event.target.value))}
                     style={{
                         width: "100%",
                         marginTop: "8px",
