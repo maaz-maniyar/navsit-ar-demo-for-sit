@@ -9,10 +9,17 @@ const HEADING_SMOOTHING = 0.18;
 const ARROW_SMOOTHING = 0.2;
 const TURN_DEADBAND_DEG = 1.5;
 const ARROW_MODEL_YAW_CORRECTION_DEG = -7;
+const WORLD_ARROW_DISTANCE_METERS = 3;
 
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
+    const startWorldArRef = useRef(null);
+    const stopWorldArRef = useRef(null);
+    const xrAvailableRef = useRef(false);
+    const [xrAvailable, setXrAvailable] = useState(false);
+    const [arMode, setArMode] = useState("overlay");
+    const [arStatus, setArStatus] = useState("Checking world AR support...");
 
     const [debug, setDebug] = useState({
         heading: 0,
@@ -26,8 +33,10 @@ const ARView = ({ onBack }) => {
         let camera;
         let renderer;
         let watchId;
-        let animationFrameId;
         let lastDebugUpdate = 0;
+        let videoElement = null;
+        let mediaStream = null;
+        let xrSession = null;
         const loader = new GLTFLoader();
         const orientationListeners = [];
         const deviceHeadingRef = { current: null };
@@ -36,6 +45,11 @@ const ARView = ({ onBack }) => {
         const targetBearingRef = { current: 0 };
         const targetCoordsRef = { current: null };
         const lastUpdateTimeRef = { current: 0 };
+        const arModeRef = { current: "overlay" };
+        const upAxis = new THREE.Vector3(0, 1, 0);
+        const tempForward = new THREE.Vector3();
+        const tempTargetDirection = new THREE.Vector3();
+        const tempTargetPosition = new THREE.Vector3();
 
         const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
         const toRad = (deg) => (deg * Math.PI) / 180;
@@ -145,6 +159,56 @@ const ARView = ({ onBack }) => {
             );
         };
 
+        const stopFallbackVideo = () => {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach((track) => track.stop());
+                mediaStream = null;
+            }
+
+            if (videoElement) {
+                videoElement.remove();
+                videoElement = null;
+            }
+        };
+
+        const ensureFallbackVideo = async () => {
+            if (arModeRef.current === "webxr" || videoElement) {
+                return;
+            }
+
+            const video = document.createElement("video");
+            video.setAttribute("autoplay", "");
+            video.setAttribute("playsinline", "");
+            Object.assign(video.style, {
+                position: "fixed",
+                top: "0",
+                left: "0",
+                width: "100vw",
+                height: "100vh",
+                objectFit: "cover",
+                zIndex: "-1",
+            });
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" },
+                });
+                video.srcObject = mediaStream;
+                document.body.appendChild(video);
+                videoElement = video;
+                setArStatus((current) =>
+                    current === "World AR active"
+                        ? current
+                        : xrAvailableRef.current
+                          ? "World AR ready. Use Enter World AR for anchored mode."
+                          : "Using free compass fallback. World AR not supported on this device/browser."
+                );
+            } catch (error) {
+                console.error("Camera error:", error);
+                setArStatus("Camera access failed. AR guidance may be limited.");
+            }
+        };
+
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 1.6, 0);
@@ -152,6 +216,7 @@ const ARView = ({ onBack }) => {
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.xr.enabled = true;
         containerRef.current.appendChild(renderer.domElement);
 
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
@@ -177,27 +242,6 @@ const ARView = ({ onBack }) => {
             undefined,
             (error) => console.error("Error loading arrow:", error)
         );
-
-        const video = document.createElement("video");
-        video.setAttribute("autoplay", "");
-        video.setAttribute("playsinline", "");
-        Object.assign(video.style, {
-            position: "fixed",
-            top: "0",
-            left: "0",
-            width: "100vw",
-            height: "100vh",
-            objectFit: "cover",
-            zIndex: "-1",
-        });
-        document.body.appendChild(video);
-
-        navigator.mediaDevices
-            .getUserMedia({ video: { facingMode: "environment" } })
-            .then((stream) => {
-                video.srcObject = stream;
-            })
-            .catch((error) => console.error("Camera error:", error));
 
         const orientationHandler = (event) => {
             const headingData = getHeadingData(event);
@@ -228,6 +272,98 @@ const ARView = ({ onBack }) => {
             window.addEventListener(eventName, orientationHandler, true);
             orientationListeners.push(eventName);
         });
+
+        const checkWorldArSupport = async () => {
+            if (!navigator.xr?.isSessionSupported) {
+                setXrAvailable(false);
+                setArStatus("Using free compass fallback. WebXR AR is not available here.");
+                await ensureFallbackVideo();
+                return;
+            }
+
+            try {
+                const supported = await navigator.xr.isSessionSupported("immersive-ar");
+                xrAvailableRef.current = supported;
+                setXrAvailable(supported);
+                setArStatus(
+                    supported
+                        ? "World AR ready. Use Enter World AR for anchored mode."
+                        : "Using free compass fallback. World AR is not supported on this device/browser."
+                );
+            } catch (error) {
+                console.error("WebXR support check failed:", error);
+                xrAvailableRef.current = false;
+                setXrAvailable(false);
+                setArStatus("Using free compass fallback. WebXR support check failed.");
+            }
+
+            await ensureFallbackVideo();
+        };
+
+        const endWorldArSession = async () => {
+            if (!xrSession) {
+                return;
+            }
+
+            const sessionToClose = xrSession;
+            xrSession = null;
+            try {
+                await sessionToClose.end();
+            } catch (error) {
+                console.error("Failed to end WebXR session:", error);
+            }
+        };
+
+        const startWorldArSession = async () => {
+            if (!navigator.xr?.requestSession || !renderer) {
+                setArStatus("World AR is not available. Staying on the free compass fallback.");
+                return;
+            }
+
+            try {
+                const sessionInit = {
+                    requiredFeatures: ["local-floor"],
+                    optionalFeatures: ["dom-overlay", "anchors", "hit-test"],
+                };
+
+                if (containerRef.current) {
+                    sessionInit.domOverlay = { root: containerRef.current };
+                }
+
+                const session = await navigator.xr.requestSession("immersive-ar", sessionInit);
+
+                xrSession = session;
+                arModeRef.current = "webxr";
+                setArMode("webxr");
+                setArStatus("World AR active");
+                stopFallbackVideo();
+
+                session.addEventListener("end", async () => {
+                    xrSession = null;
+                    arModeRef.current = "overlay";
+                    setArMode("overlay");
+                    setArStatus(
+                        xrAvailableRef.current
+                            ? "World AR closed. Using free compass fallback."
+                            : "Using free compass fallback."
+                    );
+                    await ensureFallbackVideo();
+                });
+
+                await renderer.xr.setSession(session);
+            } catch (error) {
+                console.error("Failed to start WebXR session:", error);
+                setArStatus("World AR could not start. Using the free compass fallback instead.");
+                arModeRef.current = "overlay";
+                setArMode("overlay");
+                await ensureFallbackVideo();
+            }
+        };
+
+        startWorldArRef.current = startWorldArSession;
+        stopWorldArRef.current = endWorldArSession;
+
+        checkWorldArSupport();
 
         const fetchNextNode = async (latitude, longitude) => {
             try {
@@ -269,8 +405,6 @@ const ARView = ({ onBack }) => {
         }
 
         const animate = () => {
-            animationFrameId = requestAnimationFrame(animate);
-
             if (arrowGroupRef.current && deviceHeadingRef.current !== null) {
                 smoothedHeadingRef.current =
                     smoothedHeadingRef.current === null
@@ -284,11 +418,39 @@ const ARView = ({ onBack }) => {
                 const heading = smoothedHeadingRef.current;
                 const relativeDelta = shortestAngleDelta(heading, targetBearingRef.current);
                 const relative = Math.abs(relativeDelta) < TURN_DEADBAND_DEG ? 0 : relativeDelta;
-                const targetYaw = normalizeDegrees(relative);
-                const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
-                const delta = shortestAngleDelta(currentY, targetYaw);
-                const appliedDelta = Math.abs(delta) < TURN_DEADBAND_DEG ? 0 : delta * ARROW_SMOOTHING;
-                arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(currentY + appliedDelta);
+
+                if (arModeRef.current === "webxr" && renderer.xr.isPresenting) {
+                    const xrCamera = renderer.xr.getCamera(camera);
+                    xrCamera.getWorldDirection(tempForward);
+                    tempForward.y = 0;
+
+                    if (tempForward.lengthSq() > 0.0001) {
+                        tempForward.normalize();
+                        tempTargetDirection
+                            .copy(tempForward)
+                            .applyAxisAngle(upAxis, toRad(relative))
+                            .normalize();
+
+                        tempTargetPosition
+                            .copy(xrCamera.position)
+                            .addScaledVector(tempTargetDirection, WORLD_ARROW_DISTANCE_METERS);
+
+                        arrowGroupRef.current.position.lerp(tempTargetPosition, ARROW_SMOOTHING);
+                        arrowGroupRef.current.lookAt(
+                            tempTargetPosition.clone().add(tempTargetDirection)
+                        );
+                    }
+                } else {
+                    arrowGroupRef.current.position.set(0, 0, -3);
+                    const targetYaw = normalizeDegrees(relative);
+                    const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
+                    const delta = shortestAngleDelta(currentY, targetYaw);
+                    const appliedDelta =
+                        Math.abs(delta) < TURN_DEADBAND_DEG ? 0 : delta * ARROW_SMOOTHING;
+                    arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(
+                        currentY + appliedDelta
+                    );
+                }
 
                 const now = Date.now();
                 if (now - lastDebugUpdate >= DEBUG_UPDATE_MS) {
@@ -305,22 +467,21 @@ const ARView = ({ onBack }) => {
             renderer.render(scene, camera);
         };
 
-        animate();
+        renderer.setAnimationLoop(animate);
 
         return () => {
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-            }
             if (watchId) {
                 navigator.geolocation.clearWatch(watchId);
             }
+            endWorldArSession();
             orientationListeners.forEach((eventName) => {
                 window.removeEventListener(eventName, orientationHandler, true);
             });
+            renderer.setAnimationLoop(null);
             if (renderer) {
                 renderer.dispose();
             }
-            document.querySelectorAll("video").forEach((element) => element.remove());
+            stopFallbackVideo();
         };
     }, []);
 
@@ -348,10 +509,66 @@ const ARView = ({ onBack }) => {
                 Return to Chat
             </button>
 
+            {xrAvailable && arMode !== "webxr" && (
+                <button
+                    onClick={() => startWorldArRef.current?.()}
+                    style={{
+                        position: "absolute",
+                        top: 20,
+                        right: 20,
+                        zIndex: 10,
+                        background: "rgba(15, 92, 42, 0.85)",
+                        color: "white",
+                        padding: "10px 20px",
+                        borderRadius: "8px",
+                        border: "none",
+                    }}
+                >
+                    Enter World AR
+                </button>
+            )}
+
+            {arMode === "webxr" && (
+                <button
+                    onClick={() => stopWorldArRef.current?.()}
+                    style={{
+                        position: "absolute",
+                        top: 70,
+                        right: 20,
+                        zIndex: 10,
+                        background: "rgba(0,0,0,0.6)",
+                        color: "white",
+                        padding: "10px 20px",
+                        borderRadius: "8px",
+                        border: "none",
+                    }}
+                >
+                    Exit World AR
+                </button>
+            )}
+
             <div
                 style={{
                     position: "absolute",
-                    bottom: 90,
+                    bottom: 140,
+                    left: 20,
+                    zIndex: 10,
+                    background: "rgba(0,0,0,0.5)",
+                    color: "white",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    maxWidth: "min(90vw, 360px)",
+                    fontFamily: "system-ui, sans-serif",
+                    fontSize: "14px",
+                }}
+            >
+                {arStatus}
+            </div>
+
+            <div
+                style={{
+                    position: "absolute",
+                    bottom: 20,
                     left: 20,
                     zIndex: 10,
                     background: "rgba(0,0,0,0.5)",
