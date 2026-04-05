@@ -77,6 +77,34 @@ const ARView = ({ onBack }) => {
             return 0;
         };
 
+        const computeCompassHeading = (alpha, beta, gamma) => {
+            if (alpha === null || beta === null || gamma === null) {
+                return null;
+            }
+
+            const alphaRad = toRad(alpha);
+            const betaRad = toRad(beta);
+            const gammaRad = toRad(gamma);
+
+            const cAlpha = Math.cos(alphaRad);
+            const sAlpha = Math.sin(alphaRad);
+            const sBeta = Math.sin(betaRad);
+            const cGamma = Math.cos(gammaRad);
+            const sGamma = Math.sin(gammaRad);
+
+            const rA = -cAlpha * sGamma - sAlpha * sBeta * cGamma;
+            const rB = -sAlpha * sGamma + cAlpha * sBeta * cGamma;
+
+            let heading = Math.atan2(rA, rB);
+            if (rB < 0) {
+                heading += Math.PI;
+            } else if (rA < 0) {
+                heading += 2 * Math.PI;
+            }
+
+            return normalizeDegrees((heading * 180) / Math.PI);
+        };
+
         const getHeadingData = (event) => {
             if (typeof event.webkitCompassHeading === "number") {
                 if (
@@ -92,12 +120,13 @@ const ARView = ({ onBack }) => {
                 };
             }
 
-            if (event.alpha === null) {
+            const compassHeading = computeCompassHeading(event.alpha, event.beta, event.gamma);
+            if (!Number.isFinite(compassHeading)) {
                 return null;
             }
 
             return {
-                heading: normalizeDegrees(360 - event.alpha + getScreenAngle()),
+                heading: normalizeDegrees(compassHeading + getScreenAngle()),
                 source: event.type === "deviceorientationabsolute" ? "deviceorientationabsolute" : "deviceorientation",
             };
         };
