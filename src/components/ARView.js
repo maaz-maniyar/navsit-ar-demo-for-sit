@@ -3,19 +3,21 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { BACKEND_ORIGIN } from "../config";
 
+const DEFAULT_OFFSET = -7;
+const DEBUG_UPDATE_MS = 200;
+
 const ARView = ({ onBack }) => {
     const containerRef = useRef(null);
     const arrowGroupRef = useRef(null);
 
-    // ✅ useRef for real-time offset access
-    const bearingOffsetRef = useRef(-7);
+    const bearingOffsetRef = useRef(DEFAULT_OFFSET);
 
     const [debug, setDebug] = useState({
         heading: 0,
         bearing: 0,
         relative: 0,
         nextNode: "",
-        offset: -90,
+        offset: DEFAULT_OFFSET,
     });
 
     // Load saved offset
@@ -30,6 +32,8 @@ const ARView = ({ onBack }) => {
     useEffect(() => {
         let scene, camera, renderer, watchId;
         const loader = new GLTFLoader();
+        let animationFrameId;
+        let lastDebugUpdate = 0;
 
         // === Scene Setup ===
         scene = new THREE.Scene();
@@ -105,21 +109,47 @@ const ARView = ({ onBack }) => {
             const brng = Math.atan2(y, x);
             return ((brng * 180) / Math.PI + 360) % 360;
         };
+        const getScreenAngle = () => {
+            if (window.screen?.orientation && typeof window.screen.orientation.angle === "number") {
+                return window.screen.orientation.angle;
+            }
+            if (typeof window.orientation === "number") {
+                return window.orientation;
+            }
+            return 0;
+        };
+        const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
+        const shortestAngleDelta = (fromDeg, toDeg) => {
+            return ((toDeg - fromDeg + 540) % 360) - 180;
+        };
+        const getHeading = (event) => {
+            if (typeof event.webkitCompassHeading === "number") {
+                return normalizeDegrees(event.webkitCompassHeading);
+            }
+
+            if (!event.absolute || event.alpha === null) {
+                return null;
+            }
+
+            const screenAngle = getScreenAngle();
+            return normalizeDegrees(360 - event.alpha + screenAngle);
+        };
 
         // === Live Data ===
-        let deviceHeading = 0;
+        let deviceHeading = null;
         let targetBearing = 0;
         let targetCoords = null;
         let lastUpdateTime = 0;
+        let orientationHandler;
 
         // === Orientation ===
-        window.addEventListener("deviceorientation", (event) => {
-            if (event.webkitCompassHeading !== undefined) {
-                deviceHeading = event.webkitCompassHeading; // iOS
-            } else if (event.alpha !== null) {
-                deviceHeading = 360 - event.alpha; // Android
+        orientationHandler = (event) => {
+            const heading = getHeading(event);
+            if (heading !== null) {
+                deviceHeading = heading;
             }
-        });
+        };
+        window.addEventListener("deviceorientation", orientationHandler, true);
 
         // === Backend Updates ===
         async function fetchNextNode(lat, lon) {
@@ -168,22 +198,26 @@ const ARView = ({ onBack }) => {
 
         // === Animation Loop ===
         const animate = () => {
-            requestAnimationFrame(animate);
+            animationFrameId = requestAnimationFrame(animate);
 
-            if (arrowGroupRef.current) {
-                const offset = bearingOffsetRef.current; // ✅ always current value
-                const relative = (targetBearing - deviceHeading + offset + 360) % 360;
-                const targetY = THREE.MathUtils.degToRad(relative);
-                arrowGroupRef.current.rotation.y +=
-                    (targetY - arrowGroupRef.current.rotation.y) * 0.15;
+            if (arrowGroupRef.current && deviceHeading !== null) {
+                const offset = bearingOffsetRef.current;
+                const relative = normalizeDegrees(targetBearing - deviceHeading + offset);
+                const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
+                const delta = shortestAngleDelta(currentY, relative);
+                arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(currentY + delta * 0.15);
 
-                setDebug((d) => ({
-                    ...d,
-                    heading: deviceHeading.toFixed(1),
-                    bearing: targetBearing.toFixed(1),
-                    relative: relative.toFixed(1),
-                    offset: offset.toFixed(1),
-                }));
+                const now = Date.now();
+                if (now - lastDebugUpdate >= DEBUG_UPDATE_MS) {
+                    lastDebugUpdate = now;
+                    setDebug((d) => ({
+                        ...d,
+                        heading: deviceHeading.toFixed(1),
+                        bearing: targetBearing.toFixed(1),
+                        relative: relative.toFixed(1),
+                        offset: offset.toFixed(1),
+                    }));
+                }
             }
 
             renderer.render(scene, camera);
@@ -192,7 +226,11 @@ const ARView = ({ onBack }) => {
 
         // === Cleanup ===
         return () => {
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
             if (watchId) navigator.geolocation.clearWatch(watchId);
+            if (orientationHandler) {
+                window.removeEventListener("deviceorientation", orientationHandler, true);
+            }
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
         };
@@ -226,7 +264,7 @@ const ARView = ({ onBack }) => {
                     border: "none",
                 }}
             >
-                Back
+                Return to Chat
             </button>
 
             {/* Debug Info */}
