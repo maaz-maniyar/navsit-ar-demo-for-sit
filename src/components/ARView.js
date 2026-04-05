@@ -45,6 +45,7 @@ const ARView = ({ onBack }) => {
         const orientationListeners = [];
         const deviceHeadingRef = { current: null };
         const smoothedHeadingRef = { current: null };
+        const headingSourceRef = { current: null };
         const targetBearingRef = { current: 0 };
         const targetCoordsRef = { current: null };
         const lastUpdateTimeRef = { current: 0 };
@@ -76,7 +77,7 @@ const ARView = ({ onBack }) => {
             return 0;
         };
 
-        const getHeading = (event) => {
+        const getHeadingData = (event) => {
             if (typeof event.webkitCompassHeading === "number") {
                 if (
                     typeof event.webkitCompassAccuracy === "number" &&
@@ -85,14 +86,33 @@ const ARView = ({ onBack }) => {
                 ) {
                     return null;
                 }
-                return normalizeDegrees(event.webkitCompassHeading);
+                return {
+                    heading: normalizeDegrees(event.webkitCompassHeading),
+                    source: "webkitCompassHeading",
+                };
             }
 
             if (event.alpha === null) {
                 return null;
             }
 
-            return normalizeDegrees(360 - event.alpha + getScreenAngle());
+            return {
+                heading: normalizeDegrees(360 - event.alpha + getScreenAngle()),
+                source: event.type === "deviceorientationabsolute" ? "deviceorientationabsolute" : "deviceorientation",
+            };
+        };
+
+        const getSourcePriority = (source) => {
+            switch (source) {
+                case "webkitCompassHeading":
+                    return 3;
+                case "deviceorientationabsolute":
+                    return 2;
+                case "deviceorientation":
+                    return 1;
+                default:
+                    return 0;
+            }
         };
 
         const updateTargetBearing = (latitude, longitude) => {
@@ -163,14 +183,27 @@ const ARView = ({ onBack }) => {
             .catch((error) => console.error("Camera error:", error));
 
         const orientationHandler = (event) => {
-            const heading = getHeading(event);
-            if (!Number.isFinite(heading)) {
+            const headingData = getHeadingData(event);
+            if (!headingData || !Number.isFinite(headingData.heading)) {
                 return;
             }
 
-            deviceHeadingRef.current = heading;
+            const currentSource = headingSourceRef.current;
+            if (
+                currentSource &&
+                getSourcePriority(headingData.source) < getSourcePriority(currentSource)
+            ) {
+                return;
+            }
+
+            if (currentSource !== headingData.source) {
+                headingSourceRef.current = headingData.source;
+                smoothedHeadingRef.current = headingData.heading;
+            }
+
+            deviceHeadingRef.current = headingData.heading;
             if (smoothedHeadingRef.current === null) {
-                smoothedHeadingRef.current = heading;
+                smoothedHeadingRef.current = headingData.heading;
             }
         };
 
