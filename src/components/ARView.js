@@ -34,6 +34,7 @@ const ARView = ({ onBack }) => {
         const loader = new GLTFLoader();
         let animationFrameId;
         let lastDebugUpdate = 0;
+        let orientationEventName = "deviceorientation";
 
         // === Scene Setup ===
         scene = new THREE.Scene();
@@ -127,7 +128,7 @@ const ARView = ({ onBack }) => {
                 return normalizeDegrees(event.webkitCompassHeading);
             }
 
-            if (!event.absolute || event.alpha === null) {
+            if (event.alpha === null) {
                 return null;
             }
 
@@ -149,7 +150,11 @@ const ARView = ({ onBack }) => {
                 deviceHeading = heading;
             }
         };
-        window.addEventListener("deviceorientation", orientationHandler, true);
+        orientationEventName =
+            "ondeviceorientationabsolute" in window
+                ? "deviceorientationabsolute"
+                : "deviceorientation";
+        window.addEventListener(orientationEventName, orientationHandler, true);
 
         // === Backend Updates ===
         async function fetchNextNode(lat, lon) {
@@ -229,7 +234,7 @@ const ARView = ({ onBack }) => {
             if (animationFrameId) cancelAnimationFrame(animationFrameId);
             if (watchId) navigator.geolocation.clearWatch(watchId);
             if (orientationHandler) {
-                window.removeEventListener("deviceorientation", orientationHandler, true);
+                window.removeEventListener(orientationEventName, orientationHandler, true);
             }
             if (renderer) renderer.dispose();
             document.querySelectorAll("video").forEach((v) => v.remove());
