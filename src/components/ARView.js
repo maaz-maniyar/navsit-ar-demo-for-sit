@@ -282,9 +282,11 @@ const ARView = ({ onBack }) => {
                           );
 
                 const heading = smoothedHeadingRef.current;
-                const relative = normalizeDegrees(targetBearingRef.current - heading);
+                const relativeDelta = shortestAngleDelta(heading, targetBearingRef.current);
+                const relative = Math.abs(relativeDelta) < TURN_DEADBAND_DEG ? 0 : relativeDelta;
+                const targetYaw = normalizeDegrees(relative);
                 const currentY = THREE.MathUtils.radToDeg(arrowGroupRef.current.rotation.y);
-                const delta = shortestAngleDelta(currentY, relative);
+                const delta = shortestAngleDelta(currentY, targetYaw);
                 const appliedDelta = Math.abs(delta) < TURN_DEADBAND_DEG ? 0 : delta * ARROW_SMOOTHING;
                 arrowGroupRef.current.rotation.y = THREE.MathUtils.degToRad(currentY + appliedDelta);
 
